@@ -15,7 +15,7 @@ Dernière mise à jour : 2026-11-06, phase 1.
 | Estimation de décalage d'horloge (filtre RTT minimal) | ✅ | `test_sync_telemetry` |
 | Statistiques, gigue RFC 3550, comptage de pertes | ✅ | `test_sync_telemetry` |
 | Socket UDP Windows | ✅ | `test_loopback` (vrais sockets) |
-| Socket UDP Android | 🟡 | compilé uniquement quand l'APK l'est ; non testé sur le casque |
+| Socket UDP Android | 🟡 | compilé (NDK 27.2, clang, arm64) ; non testé sur le casque |
 | Service hôte (réponse découverte + pong) / client (découverte + ping) | ✅ sur PC | `test_loopback`, `kage-host serve`/`discover`/`ping` |
 | Chiffrement, appairage, authentification | ❌ | phase 2 |
 | Interface `Transport` (UDP / ADB / USB AOA) | ❌ | phase 2 et suivantes |
@@ -34,8 +34,8 @@ Dernière mise à jour : 2026-11-06, phase 1.
 
 | Fonction | État |
 |---|---|
-| Projet Gradle/NDK, manifeste Quest | 🟡 écrit, **pas encore compilé** (SDK Android absent) |
-| Session OpenXR GLES, swapchains stéréo, couche de projection | 🟡 écrit, non compilé, non testé sur le casque |
+| Projet Gradle/NDK, manifeste Quest | ✅ compilé : `app-debug.apk` 6,2 Mo, arm64-v8a uniquement, minSdk 29 / targetSdk 32, 3 permissions (INTERNET, OPENXR, OPENXR_SYSTEM), sans avertissement de compilation |
+| Session OpenXR GLES, swapchains stéréo, couche de projection | 🟡 compilé, **non testé sur le casque** |
 | Journalisation de la résolution recommandée par œil et des fréquences supportées | 🟡 |
 | Découverte du PC + ping / estimation d'horloge en arrière-plan | 🟡 |
 | Affichage d'un texte ou d'un menu VR | ❌ (pour l'instant, une couleur unie indique l'état) |

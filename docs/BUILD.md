@@ -28,9 +28,9 @@ Prérequis :
 1. JDK 17 (`winget install Microsoft.OpenJDK.17`, déjà installé ici).
 2. Android Studio (`winget install Google.AndroidStudio`). L'installation demande d'accepter la licence du SDK Android : c'est à l'utilisateur de le faire.
 3. Dans Android Studio > SDK Manager :
-   - SDK Platforms : **Android 14 (API 34)**
+   - SDK Platforms : **API 37** (c'est la valeur de `compileSdk` ; testé avec android-37.0)
    - SDK Tools : **NDK (Side by side) 27.2.12479018**, **CMake 3.22.1**, **Android SDK Platform-Tools** (adb)
-4. Gradle wrapper (une seule fois) : ouvrir `apps/quest-client` dans Android Studio, qui propose de le créer. Si Gradle est installé, on peut aussi lancer `gradle wrapper --gradle-version 9.9.0` dans `apps/quest-client`.
+4. Le Gradle wrapper (Gradle 9.9.0, AGP 9.5.1) est versionné dans `apps/quest-client` : il n'y a rien à installer de plus.
 
 ```powershell
 .\scripts\build-quest.ps1            # produit app-debug.apk

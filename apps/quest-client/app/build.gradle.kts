@@ -4,7 +4,7 @@ plugins {
 
 android {
     namespace = "dev.kage.vrstream"
-    compileSdk = 34
+    compileSdk = 37  // build-time API level only; device requirements are minSdk/targetSdk
     // Must be installed through the Android SDK Manager (SDK Tools > NDK (Side by side)).
     ndkVersion = "27.2.12479018"
 
