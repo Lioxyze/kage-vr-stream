@@ -31,6 +31,9 @@ $adb="$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"; & $adb install -r a
 ## Environnement connu
 Win11 Pro, Ryzen 5 5600X, RX 6700 XT (AMF 1.4.37, HEVC+H.264 matériel, **pas d'AV1**), VS2022 MSVC 14.44, CMake 4.4.4, JDK 17, SteamVR installé (pilote Virtual Desktop aussi enregistré ; runtime OpenXR actif = Virtual Desktop). PC 192.168.1.10 Wi-Fi, casque 192.168.1.100 (5 GHz canal 64). Quest : 1680×1760/œil, 72/80/90/120 Hz, Adreno 740.
 
+## Test réel
+`.\scripts\dev-e2e.ps1 [-NoInstall]` (connexion auto + proximité désactivée) ; `KAGE_DUMP_FRAME=1` pour une image composée en BMP. GUI : `dotnet build apps\windows-gui\KageVR.Gui.csproj -c Release -o build\gui`. Pilote déjà enregistré via vrpathreg (`kage-host remove-driver` pour retirer). Pièges déjà rencontrés : ne jamais appeler AMediaCodec depuis ses callbacks ; vider l'ImageReader en permanence ; lier le cbuffer au VS ; verrou ID3D10Multithread autour de la composition (contexte partagé avec AMF).
+
 ## Ports UDP
 47800 découverte · 47801 contrôle (kage-host) · 47802 streaming (pilote SteamVR).
 

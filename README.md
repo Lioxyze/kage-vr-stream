@@ -2,7 +2,15 @@
 
 Plateforme open source de streaming PCVR (Wi-Fi, et à terme USB-C) entre un PC Windows et un Meta Quest 3.
 
-> **État : phase 1 (fondations).** Ce n'est pas encore un logiciel jouable. Il n'y a ni vidéo, ni intégration SteamVR, ni chiffrement. La liste exacte de ce qui fonctionne est dans [docs/STATUS.md](docs/STATUS.md).
+> **État : première session PCVR fonctionnelle.** SteamVR s'affiche dans un Quest 3S en Wi-Fi à 90 Hz, avec les manettes suivies et un débit adaptatif. Il manque encore l'audio, le chiffrement et un test en jeu réel. Détails et mesures : [docs/STATUS.md](docs/STATUS.md).
+
+## Utilisation
+
+1. Compiler : `.\scripts\build-host.ps1`, `dotnet build apps\windows-gui\KageVR.Gui.csproj -c Release -o build\gui`, puis `.\scripts\build-quest.ps1 -Install`.
+2. Lancer `build\gui\KageVR.exe`, puis cliquer sur **Installer le pilote SteamVR** (une seule fois).
+3. Dans le casque : *Bibliothèque > Sources inconnues > KAGÉ VR Stream*, puis viser ton PC avec la manette et appuyer sur la gâchette.
+4. SteamVR se lance tout seul sur le PC. Au premier lancement, faire **Configuration de la pièce > Debout uniquement**.
+5. Pendant la session : **appui long sur le bouton Menu gauche** pour afficher les statistiques ou se déconnecter.
 
 ## Structure
 
