@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstring>
 
 #include "kage/protocol/packet.hpp"
 #include "kage/protocol/video_fragment.hpp"
@@ -134,6 +135,13 @@ void StreamServer::sendHaptics(const Haptics& hp) {
     std::vector<uint8_t> payload;
     encodeMessage(hp, payload);
     send(Channel::Control, payload);
+}
+
+void StreamServer::sendAudio(uint32_t sampleRate, std::span<const int16_t> samples) {
+    audioBuf_.resize(4 + samples.size_bytes());
+    for (int i = 0; i < 4; ++i) audioBuf_[i] = static_cast<uint8_t>(sampleRate >> (8 * i));
+    std::memcpy(audioBuf_.data() + 4, samples.data(), samples.size_bytes());  // both ends little-endian
+    send(Channel::Audio, audioBuf_);
 }
 
 }  // namespace kage::driver

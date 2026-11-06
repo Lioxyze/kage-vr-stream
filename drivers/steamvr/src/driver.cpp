@@ -14,6 +14,7 @@
 #include <thread>
 
 #include "amf_encoder.hpp"
+#include "audio_capture.hpp"
 #include "d3d_compositor.hpp"
 #include "kage/util/log.hpp"
 #include "kage/util/time.hpp"
@@ -490,9 +491,13 @@ public:
             if (auto* h = hmd_.load()) h->onStats(s);
         };
         if (!server_.start(kp::kDefaultStreamPort)) return vr::VRInitError_Driver_Failed;
+        audio_.enabled = [this] { return server_.clientActive(); };
+        audio_.onChunk = [this](uint32_t rate, std::span<const int16_t> pcm) { server_.sendAudio(rate, pcm); };
+        audio_.start();
         return vr::VRInitError_None;
     }
     void Cleanup() override {
+        audio_.stop();
         server_.stop();
         VR_CLEANUP_SERVER_DRIVER_CONTEXT();
     }
@@ -535,6 +540,7 @@ public:
 
 private:
     kage::driver::StreamServer server_;
+    kage::driver::AudioCapture audio_;
     std::unique_ptr<Hmd> hmdObj_;
     std::atomic<Hmd*> hmd_{nullptr};
     std::unique_ptr<Controller> ctrl_[2];

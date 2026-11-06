@@ -34,6 +34,8 @@ public:
     void sendVideo(uint32_t frameIndex, bool keyframe, const protocol::VideoFrameMeta& meta,
                    std::span<const uint8_t> bitstream);
     void sendHaptics(const protocol::Haptics& h);
+    // Raw PCM on the audio channel: u32 sample rate (LE) + interleaved stereo int16.
+    void sendAudio(uint32_t sampleRate, std::span<const int16_t> samples);
 
 private:
     void recvLoop();
@@ -50,7 +52,7 @@ private:
     std::atomic<uint64_t> lastRecvUs_{0};
     std::mutex sendMutex_;
     uint32_t seq_[6] = {};
-    std::vector<uint8_t> frameBuf_, packet_;
+    std::vector<uint8_t> frameBuf_, packet_, audioBuf_;
 };
 
 }  // namespace kage::driver

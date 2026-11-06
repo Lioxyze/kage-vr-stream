@@ -31,6 +31,7 @@ void StreamClient::start(const kage::net::Endpoint& driver, const kp::StreamHell
 void StreamClient::stop() {
     if (!running_.exchange(false)) return;
     if (thread_.joinable()) thread_.join();
+    audio_.close();
     decoder_ = nullptr;
 }
 
@@ -180,6 +181,13 @@ void StreamClient::loop() {
             if (auto* dec = decoder_.load())
                 dec->submit(frame->frameIndex, frame->data.data() + kp::VideoFrameMeta::kSize,
                             frame->data.size() - kp::VideoFrameMeta::kSize, recvUs);
+            continue;
+        }
+        if (h.channel == kp::Channel::Audio) {
+            // u32 sample rate + interleaved stereo int16 (whole frames only).
+            if (body.size() < 8 || (body.size() - 4) % 4) continue;
+            const uint32_t rate = body[0] | body[1] << 8 | body[2] << 16 | static_cast<uint32_t>(body[3]) << 24;
+            audio_.push(rate, {reinterpret_cast<const int16_t*>(body.data() + 4), (body.size() - 4) / 2});
             continue;
         }
         auto msg = kp::decodeMessage(body);

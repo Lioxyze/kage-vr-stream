@@ -12,6 +12,7 @@
 #include "kage/protocol/messages.hpp"
 #include "kage/protocol/video_fragment.hpp"
 #include "kage/sync/clock_sync.hpp"
+#include "audio_player.hpp"
 #include "video_decoder.hpp"
 
 struct StreamStats {
@@ -60,5 +61,6 @@ private:
     uint32_t seq_[6] = {};
     std::vector<uint8_t> payload_, packet_;
     kage::sync::ClockSync clock_;
+    AudioPlayer audio_;  // fed and reopened from the network thread only
     bool loggedFirst_ = false;
 };

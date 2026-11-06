@@ -19,7 +19,7 @@ Dernière mise à jour : 2026-11-06. Matériel de test : RX 6700 XT + **Meta Que
 | Menu en session (appui long Menu gauche) : stats, Recentrer, Déconnecter | 🟡 | non testé casque porté |
 | Calibration automatique de la prédiction de pose | 🟡 | active, non mesurée casque porté |
 | Jeu PCVR réel testé | ❌ | à faire, casque porté |
-| Audio | ❌ | prévu : PCM 48 kHz brut (environ 1,5 Mbit/s, sans latence de codec) |
+| Audio PC → casque | 🟡 | écrit et compilé (capture WASAPI de la sortie par défaut, PCM 16 bits brut ≈1,5 Mbit/s, AAudio basse latence, tampon 30 ms), pas encore testé dans le casque. Le son joue aussi sur le PC. Micro : non |
 | Chiffrement et appairage | ❌ | **le flux circule en clair sur le réseau local** |
 | USB-C | ❌ | |
 
