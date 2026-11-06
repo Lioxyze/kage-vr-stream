@@ -1,0 +1,16 @@
+/build/
+/out/
+/tools/
+.vs/
+*.user
+
+# Android / Gradle
+apps/quest-client/.gradle/
+apps/quest-client/build/
+apps/quest-client/app/build/
+apps/quest-client/app/.cxx/
+apps/quest-client/local.properties
+*.apk
+*.keystore
+*.jks
+.idea/
