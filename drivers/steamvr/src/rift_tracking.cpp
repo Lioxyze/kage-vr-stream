@@ -1,4 +1,4 @@
-#include "rift_tracking.hpp"
+﻿#include "rift_tracking.hpp"
 
 #include <windows.h>
 
@@ -276,7 +276,9 @@ struct RiftTracking::Impl {
             }
             const Q R = yawQ(c.yaw);
             for (int i = 0; i < 3; ++i) {
-                const bool valid = src[i] && (flags[i] & ovrStatus_PositionTracked) && c.valid;
+                // Shown even before calibration (raw Rift space) so the user sees them; kept
+                // valid while only the orientation is tracked (short occlusions) to avoid blinking.
+                const bool valid = src[i] && (flags[i] & (ovrStatus_PositionTracked | ovrStatus_OrientationTracked));
                 if (!src[i]) {
                     trackers[i].update(false, {}, {});
                     continue;
@@ -322,7 +324,7 @@ struct RiftTracking::Impl {
             }
             // Live tracked count (Rift asleep or controller off => 0/3), shown in the GUI.
             int tracked = 0;
-            for (int i = 0; i < 3; ++i) tracked += src[i] && (flags[i] & ovrStatus_PositionTracked) ? 1 : 0;
+            for (int i = 0; i < 3; ++i) tracked += src[i] && (flags[i] & (ovrStatus_PositionTracked | ovrStatus_OrientationTracked)) ? 1 : 0;
             if (calibEnd == 0 && tracked != lastTracked) {
                 lastTracked = tracked;
                 status(std::string("Rift connecté : ") + std::to_string(tracked) + "/3 trackers suivis" +
