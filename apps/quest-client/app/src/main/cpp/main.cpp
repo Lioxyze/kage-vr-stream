@@ -356,6 +356,9 @@ private:
             menuDownAt_ = 0;  // one toggle per press
             if (overlay_ && ctx_.headValid) panel_.placeInFront(ctx_.head, 0.9f);
         }
+        // Short press (released before the long-press delay): one 120 ms click of the SteamVR
+        // system button, which opens the SteamVR dashboard.
+        if (!menu && menuWasDown_ && menuDownAt_ && now - menuDownAt_ < 600'000) menuPulseUntil_ = now + 120'000;
         if (!menu) menuDownAt_ = 0;
         menuWasDown_ = menu;
     }
@@ -469,7 +472,7 @@ private:
             o.thumbstickY = std::clamp(in.stickY, -1.f, 1.f);
             const uint32_t b1 = i == 0 ? kp::kButtonX : kp::kButtonA, b2 = i == 0 ? kp::kButtonY : kp::kButtonB;
             o.buttons = (in.btn1 ? b1 : 0) | (in.btn2 ? b2 : 0) | (in.stickClick ? kp::kButtonThumbstick : 0) |
-                        (in.menu && !menuDownAt_ ? kp::kButtonMenu : 0);
+                        (i == 0 && monotonicMicros() < menuPulseUntil_ ? kp::kButtonMenu : 0);
             o.touches = (in.btn1Touch ? b1 : 0) | (in.btn2Touch ? b2 : 0) | (in.stickTouch ? kp::kButtonThumbstick : 0) |
                         (in.triggerTouch ? kp::kButtonTrigger : 0) | (in.thumbrest ? kp::kButtonThumbrest : 0);
         }
@@ -725,6 +728,7 @@ private:
     std::optional<uint32_t> pairCode_;
     int streamFps_ = 60;
     uint64_t calibUntilUs_ = 0;
+    uint64_t menuPulseUntil_ = 0;  // short press on left Menu -> SteamVR system click
     uint64_t connectStartUs_ = 0, lostSinceUs_ = 0, menuDownAt_ = 0;
     bool menuWasDown_ = false, autoTried_ = false;
     FrameContext ctx_;
