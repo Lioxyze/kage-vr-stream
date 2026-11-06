@@ -24,6 +24,9 @@
 #include "kage/telemetry/stats.hpp"
 #include "kage/util/log.hpp"
 #include "probe.hpp"
+#ifdef KAGE_WITH_RIFT
+#include "rift_reader.hpp"
+#endif
 
 namespace {
 
@@ -212,7 +215,15 @@ int cmdServe(const std::vector<std::string>& a) {
     if (!svc.start()) return 1;
     kage::log::info("host '{}' ready. Windows may ask to allow kage-host on private networks (UDP {}/{}). Ctrl+C to stop.",
                     cfg.hostName, svc.discoveryPort(), svc.controlPort());
+#ifdef KAGE_WITH_RIFT
+    // Full body: read the Rift here (outside SteamVR) and feed the KAGE driver locally.
+    std::thread rift;
+    if (std::filesystem::exists(dir / L"fullbody.enabled")) rift = std::thread([&] { kage::host::runRiftReader(g_stop, dir); });
+#endif
     while (!g_stop) std::this_thread::sleep_for(std::chrono::milliseconds(200));
+#ifdef KAGE_WITH_RIFT
+    if (rift.joinable()) rift.join();
+#endif
     svc.stop();
     kage::log::info("stopped. probes answered: {}, pings answered: {}, rejected packets: {}",
                     svc.counters().probesAnswered.load(), svc.counters().pingsAnswered.load(),

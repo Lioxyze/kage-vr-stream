@@ -2,9 +2,13 @@
 
 #include <windows.h>
 
-#include <OVR_CAPI.h>
+#include "kage/net/udp_socket.hpp"
+#include "kage/protocol/rift_poses.hpp"
 
+#include <array>
 #include <atomic>
+#include <chrono>
+#include <cstring>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -19,6 +23,8 @@
 namespace kage::driver {
 
 namespace {
+
+double nowS() { return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 
 struct V3 {
     double x = 0, y = 0, z = 0;
@@ -228,13 +234,15 @@ private:
     vr::DriverPose_t pose_{};
 };
 
-Q toQ(const ovrQuatf& q) { return {q.w, q.x, q.y, q.z}; }
-V3 toV(const ovrVector3f& v) { return {v.x, v.y, v.z}; }
 
 }  // namespace
 
 struct RiftTracking::Impl {
-    ovrSession session = nullptr;
+    net::UdpSocket sock;            // 127.0.0.1:47803, poses from kage-host
+    protocol::RiftPoses poses{};
+    double lastRecv = -10, lastPredSent = 0;
+    net::Endpoint reader;
+    bool haveReader = false;
     std::filesystem::path dir;
     std::thread thread;
     std::atomic<bool> running{false};
@@ -305,22 +313,36 @@ struct RiftTracking::Impl {
     void loop() {
         const auto request = dir / L"calibrate.request";
         std::vector<std::pair<Q, V3>> sa, sb;
-        double calibEnd = 0, calibStart = 0, lastSample = 0, last = ovr_GetTimeInSeconds(), lastCheck = 0;
+        double calibEnd = 0, calibStart = 0, lastSample = 0, last = nowS(), lastCheck = 0;
+        std::array<uint8_t, 256> buf{};
         int lastTracked = -1;
         while (running) {
-            const double now = ovr_GetTimeInSeconds();
+            // Wait for the next pose packet from kage-host (sent at ~300 Hz).
+            size_t n = 0;
+            net::Endpoint from;
+            for (int wait = 4; sock.receive(buf, n, from, wait) == net::RecvStatus::Ok; wait = 0) {  // keep the newest
+                protocol::RiftPoses p;
+                if (from.ipv4 != 0x7F000001u || !protocol::decodeRiftPoses({buf.data(), n}, p)) continue;
+                poses = p;
+                lastRecv = nowS();
+                reader = from;
+                haveReader = true;
+            }
+            const double now = nowS();
             const double dt = now - last;
             last = now;
-            // Predict to the same instant as the Quest poses (its display time), else the trackers
-            // trail the controllers by the whole streaming latency.
-            const double at = now + predictS.load();
-            const ovrTrackingState ts = ovr_GetTrackingState(session, at, ovrFalse);
-            ovrTrackedDeviceType objType = ovrTrackedDevice_Object0;
-            ovrPoseStatef obj{};
-            const bool objOk = (ovr_GetConnectedControllerTypes(session) & ovrControllerType_Object0) &&
-                               OVR_SUCCESS(ovr_GetDevicePoses(session, &objType, 1, at, &obj));
-            const ovrPoseStatef* src[3] = {&ts.HandPoses[0], &ts.HandPoses[1], objOk ? &obj : nullptr};
-            const unsigned flags[3] = {ts.HandStatusFlags[0], ts.HandStatusFlags[1], objOk ? static_cast<unsigned>(ovrStatus_PositionTracked) : 0u};  // no status for objects
+            // Tell the reader how far ahead to sample (the Quest prediction horizon).
+            if (haveReader && now - lastPredSent > 0.5) {
+                lastPredSent = now;
+                uint8_t msg[8];
+                const float pr = static_cast<float>(predictS.load());
+                std::memcpy(msg, &protocol::kRiftMagic, 4);
+                std::memcpy(msg + 4, &pr, 4);
+                sock.sendTo(reader, {msg, 8});
+            }
+            const bool fresh = now - lastRecv < 0.5;  // kage-host running and Rift connected
+            unsigned flags[3];
+            for (int i = 0; i < 3; ++i) flags[i] = fresh ? poses[i].flags : 0u;
             Calibration c;
             {
                 std::lock_guard l(m);
@@ -330,13 +352,10 @@ struct RiftTracking::Impl {
             for (int i = 0; i < 3; ++i) {
                 // Shown even before calibration (raw Rift space) so the user sees them; kept
                 // valid while only the orientation is tracked (short occlusions) to avoid blinking.
-                const bool valid = src[i] && (flags[i] & (ovrStatus_PositionTracked | ovrStatus_OrientationTracked));
-                if (!src[i]) {
-                    trackers[i].update(false, {}, {});
-                    continue;
-                }
-                V3 p = add(rot(R, toV(src[i]->ThePose.Position)), c.t);
-                Q o = qmul(R, toQ(src[i]->ThePose.Orientation));
+                const bool valid = flags[i] != 0;
+                const auto& s = poses[i];
+                V3 p = add(rot(R, {s.pos[0], s.pos[1], s.pos[2]}), c.t);
+                Q o = qmul(R, {s.rot[0], s.rot[1], s.rot[2], s.rot[3]});
                 if (valid) filters[i].filter(p, o, dt);
                 trackers[i].update(valid, p, o);
             }
@@ -362,9 +381,9 @@ struct RiftTracking::Impl {
                     V3 rp = refP;
                     bool ok = refValid && now - refTime < 0.2;
                     if (!ok) ok = steamVrRightController(rq, rp);  // e.g. Virtual Desktop session
-                    if (ok && (ts.HandStatusFlags[1] & ovrStatus_PositionTracked)) {
+                    if (ok && (flags[1] & protocol::kRiftPosition)) {
                         sa.push_back({rq, rp});
-                        sb.push_back({toQ(ts.HandPoses[1].ThePose.Orientation), toV(ts.HandPoses[1].ThePose.Position)});
+                        sb.push_back({Q{poses[1].rot[0], poses[1].rot[1], poses[1].rot[2], poses[1].rot[3]}, V3{poses[1].pos[0], poses[1].pos[1], poses[1].pos[2]}});
                     }
                 }
                 if (now > calibEnd) {
@@ -381,12 +400,12 @@ struct RiftTracking::Impl {
             }
             // Live tracked count (Rift asleep or controller off => 0/3), shown in the GUI.
             int tracked = 0;
-            for (int i = 0; i < 3; ++i) tracked += src[i] && (flags[i] & (ovrStatus_PositionTracked | ovrStatus_OrientationTracked)) ? 1 : 0;
+            for (int i = 0; i < 3; ++i) tracked += flags[i] ? 1 : 0;
             if (calibEnd == 0 && tracked != lastTracked) {
                 lastTracked = tracked;
                 status(std::string("Rift connecté : ") + std::to_string(tracked) + "/3 trackers suivis" +
                        (c.valid ? ", calibré" : " - calibration nécessaire") +
-                       (tracked == 0 ? " (Rift en veille ? manettes éteintes ?)" : ""));
+                       (tracked == 0 ? (fresh ? " (Rift en veille ? manettes éteintes ?)" : " (KageVR fermé ou Rift non connecté ?)") : ""));
             }
             Sleep(4);  // ~250 Hz; SteamVR interpolates between updates
         }
@@ -399,32 +418,18 @@ RiftTracking::~RiftTracking() { stop(); }
 bool RiftTracking::start(const std::filesystem::path& dataDir) {
     auto& d = *impl_;
     d.dir = dataDir;
-    // Invisible: no rendering, the Rift is only a tracking source.
-    ovrInitParams p{ovrInit_RequestVersion | ovrInit_Invisible | ovrInit_FocusAware, OVR_MINOR_VERSION, nullptr, 0, 0};
-    if (const ovrResult r = ovr_Initialize(&p); OVR_FAILURE(r)) {
-        ovrErrorInfo info{};
-        ovr_GetLastErrorInfo(&info);
-        d.status(r == -3008 ? std::string("Rift : le pilote Oculus intégré à SteamVR utilise déjà le Rift. Fermer SteamVR, cliquer « 2. Préparer SteamVR », relancer.")
-                            : std::string("Rift : runtime Meta indisponible (Meta Horizon Link installé et lancé ?) [") + std::to_string(r) + " " + info.ErrorString + "]");
+    auto s = net::UdpSocket::open(protocol::kRiftPosePort, 0x7F000001u, false);  // local only
+    if (!s) {
+        d.status("Full body : port local 47803 indisponible");
         return false;
     }
-    ovrGraphicsLuid luid;
-    if (const ovrResult r = ovr_Create(&d.session, &luid); OVR_FAILURE(r)) {
-        ovrErrorInfo info{};
-        ovr_GetLastErrorInfo(&info);
-        ovr_Shutdown();
-        d.session = nullptr;
-        d.status(std::string("Rift : casque CV1 non détecté (branché, Meta Horizon Link lancé ?) [") + std::to_string(r) + " " + info.ErrorString + "]");
-        return false;
-    }
-    ovr_SetTrackingOriginType(d.session, ovrTrackingOrigin_FloorLevel);
+    d.sock = std::move(*s);
     d.loadCalibration();
     std::error_code ec;  // a request left over from an earlier session must not fire now
     std::filesystem::remove(dataDir / L"calibrate.request", ec);
     for (auto& t : d.trackers) vr::VRServerDriverHost()->TrackedDeviceAdded(t.serial(), vr::TrackedDeviceClass_GenericTracker, &t);
     d.running = true;
     d.thread = std::thread([&d] { d.loop(); });
-    d.status(d.calib.valid ? "Rift connecté, calibration chargée" : "Rift connecté : calibration nécessaire");
     return true;
 }
 
@@ -434,17 +439,13 @@ void RiftTracking::stop() {
     auto& d = *impl_;
     if (!d.running.exchange(false)) return;
     if (d.thread.joinable()) d.thread.join();
-    ovr_Destroy(d.session);
-    ovr_Shutdown();
-    d.session = nullptr;
 }
-
 void RiftTracking::setReference(const protocol::ControllerState& c, double predictionS) {
     impl_->predictS = predictionS > 0 && predictionS < 0.2 ? predictionS : 0.04;
     auto& d = *impl_;
     std::lock_guard l(d.m);
     d.refValid = (c.flags & protocol::kPoseValid) != 0;
-    d.refTime = ovr_GetTimeInSeconds();
+    d.refTime = nowS();
     d.refP = {c.pose.position[0], c.pose.position[1], c.pose.position[2]};
     d.refQ = {c.pose.orientation[3], c.pose.orientation[0], c.pose.orientation[1], c.pose.orientation[2]};
 }
