@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <format>
 #include <memory>
 #include <mutex>
@@ -551,6 +552,10 @@ public:
         };
         server_.onIdrRequest = [this] {
             if (auto* h = hmd_.load()) h->requestIdr();
+        };
+        server_.onCalibrateFullBody = [this] {  // same trigger as the GUI button
+            std::ofstream(dataDir_ / L"calibrate.request") << 1;
+            klog::info("full body calibration requested from the headset");
         };
         server_.onStats = [this](const kp::ClientStats& s) {
             if (auto* h = hmd_.load()) h->onStats(s);

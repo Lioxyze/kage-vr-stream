@@ -109,6 +109,8 @@ void StreamServer::recvLoop() {
             if (onTracking) onTracking(*t);
         } else if (std::get_if<IdrRequest>(&*msg)) {
             if (onIdrRequest) onIdrRequest();
+        } else if (std::get_if<CalibrateFullBody>(&*msg)) {
+            if (onCalibrateFullBody) onCalibrateFullBody();
         } else if (auto* s = std::get_if<ClientStats>(&*msg)) {
             if (onStats) onStats(*s);
         } else if (auto* p = std::get_if<Ping>(&*msg)) {

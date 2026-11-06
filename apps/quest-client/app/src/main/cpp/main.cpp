@@ -272,7 +272,7 @@ const Button* buttonAt(const std::vector<Button>& b, float u, float v) {
 std::string ms(float v) { return v >= 0 ? std::format("{:.1f} ms", v) : std::string("Non disponible"); }
 
 enum class Mode { Lobby, Connecting, Streaming };
-enum ButtonId { kBtnHost0 = 100, kBtnRate0 = 200, kBtnDisconnect = 300, kBtnResume = 301, kBtnRecenter = 302 };
+enum ButtonId { kBtnHost0 = 100, kBtnRate0 = 200, kBtnDisconnect = 300, kBtnResume = 301, kBtnRecenter = 302, kBtnCalibrate = 303 };
 
 // ---------------------------------------------------------------------------
 class App {
@@ -528,6 +528,7 @@ private:
         } else if (overlay_) {
             buttons_.push_back({-0.26f, -top + 0.09f, 0.3f, 0.07f, "Reprendre", kBtnResume});
             buttons_.push_back({0.05f, -top + 0.09f, 0.22f, 0.07f, "Recentrer", kBtnRecenter});
+            buttons_.push_back({0.0f, -top + 0.19f, 0.62f, 0.07f, "Calibrer le full body (Rift)", kBtnCalibrate});
             buttons_.push_back({0.30f, -top + 0.09f, 0.24f, 0.07f, "Déconnecter", kBtnDisconnect});
         }
     }
@@ -546,6 +547,9 @@ private:
             disconnect();
         } else if (id == kBtnResume) {
             overlay_ = false;
+        } else if (id == kBtnCalibrate) {
+            stream_.requestFullBodyCalibration();
+            calibUntilUs_ = monotonicMicros() + 15'000'000;
         } else if (id == kBtnRecenter && ctx_.headValid) {
             panel_.placeInFront(ctx_.head, 0.9f);
         }
@@ -670,6 +674,8 @@ private:
                 y -= 0.045f;
             };
             line(std::format("Connecté à {}", target_.name), palette::kCyan);
+            if (const uint64_t now = monotonicMicros(); now < calibUntilUs_)
+                line(std::format("Calibration : manettes droites Rift + Quest collées, tourne-les ({} s)", (calibUntilUs_ - now) / 1'000'000 + 1), palette::kWarn);
             line(std::format("Images reçues : {:.0f} /s   Débit : {:.1f} Mbit/s", s.fps, s.mbps));
             line(std::format("Aller-retour réseau : {}   Transit : {}", ms(s.rttMs), ms(s.networkMs)));
             line(std::format("Décodage : {}   Images perdues : {}/s", ms(s.decodeMs), s.dropped));
@@ -718,6 +724,7 @@ private:
     kage::crypto::KeyPair identity_;
     std::optional<uint32_t> pairCode_;
     int streamFps_ = 60;
+    uint64_t calibUntilUs_ = 0;
     uint64_t connectStartUs_ = 0, lostSinceUs_ = 0, menuDownAt_ = 0;
     bool menuWasDown_ = false, autoTried_ = false;
     FrameContext ctx_;

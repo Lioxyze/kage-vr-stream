@@ -109,6 +109,7 @@ MessageType typeOf(const Message& m) {
                           [](const PairReply&) { return MessageType::PairReply; },
                           [](const SecureHello&) { return MessageType::SecureHello; },
                           [](const SecureAccept&) { return MessageType::SecureAccept; },
+                          [](const CalibrateFullBody&) { return MessageType::CalibrateFullBody; },
                       },
                       m);
 }
@@ -164,6 +165,7 @@ void encodeMessage(const Message& m, std::vector<uint8_t>& out) {
                        w.bytes(c.clientStatic);
                        w.bytes(c.clientEphemeral);
                    },
+                   [&](const CalibrateFullBody&) {},
                    [&](const SecureAccept& c) {
                        w.bytes(c.hostEphemeral);
                        w.bytes(c.confirm);
@@ -312,6 +314,9 @@ std::optional<Message> decodeMessage(std::span<const uint8_t> payload) {
             result = c;
             break;
         }
+        case MessageType::CalibrateFullBody:
+            result = CalibrateFullBody{};
+            break;
         case MessageType::SecureAccept: {
             SecureAccept c;
             readKey(r, c.hostEphemeral);

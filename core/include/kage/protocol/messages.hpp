@@ -35,6 +35,7 @@ enum class MessageType : uint8_t {
     IdrRequest = 42,      // client -> driver: lost reference, need a keyframe
     Haptics = 43,         // driver -> client
     ClientStats = 44,     // client -> driver, ~1 Hz, feeds bitrate control
+    CalibrateFullBody = 45,  // client -> driver: start the Rift CV1 calibration (15 s)
     PairRequest = 32,     // client -> kage-host, repeated while the user compares the code
     PairReply = 33,
     SecureHello = 50,     // client -> driver: static + ephemeral X25519 keys (clear)
@@ -207,6 +208,8 @@ struct Haptics {
     float amplitude = 0;  // [0,1]
 };
 
+struct CalibrateFullBody {};
+
 struct ClientStats {
     uint32_t framesReceived = 0;  // since previous report
     uint32_t framesDropped = 0;   // incomplete / late, since previous report
@@ -227,7 +230,7 @@ bool decodeFrameMeta(std::span<const uint8_t> in, VideoFrameMeta& m);
 
 using Message = std::variant<DiscoveryProbe, DiscoveryAnnounce, Ping, Pong, Heartbeat, Disconnect, TrackingState,
                              ConnectRequest, ConnectReply, StreamHello, StreamConfig, IdrRequest, Haptics, ClientStats,
-                             PairRequest, PairReply, SecureHello, SecureAccept>;
+                             PairRequest, PairReply, SecureHello, SecureAccept, CalibrateFullBody>;
 
 MessageType typeOf(const Message& m);
 

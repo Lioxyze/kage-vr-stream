@@ -39,6 +39,9 @@ public:
     bool videoFlowing() const;  // a frame arrived in the last 500 ms
 
     void sendTracking(const kage::protocol::TrackingState& t);
+    void requestFullBodyCalibration() {
+        if (running_) send(kage::protocol::Channel::Control, kage::protocol::CalibrateFullBody{});
+    }
     std::optional<kage::protocol::Haptics> popHaptics();
     kage::protocol::VideoFrameMeta meta(uint32_t frameIndex) const;
     StreamStats stats() const;

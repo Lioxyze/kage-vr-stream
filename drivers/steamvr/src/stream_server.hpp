@@ -25,6 +25,7 @@ public:
     std::function<void(const protocol::TrackingState&)> onTracking;  // network thread
     std::function<void()> onIdrRequest;
     std::function<void(const protocol::ClientStats&)> onStats;
+    std::function<void()> onCalibrateFullBody;
 
     // dataDir holds host.key and paired.txt (shared with kage-host).
     bool start(uint16_t port, const std::filesystem::path& dataDir);
