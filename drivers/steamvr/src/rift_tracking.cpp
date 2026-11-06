@@ -176,10 +176,23 @@ public:
         p->SetStringProperty(c, vr::Prop_ManufacturerName_String, "KAGE");
         p->SetStringProperty(c, vr::Prop_TrackingSystemName_String, "oculus");
         p->SetStringProperty(c, vr::Prop_SerialNumber_String, serial_);
-        p->SetStringProperty(c, vr::Prop_ControllerType_String, type_);
+        // Same declaration as OculusTouchLink (known to render): a plain Vive tracker.
+        (void)type_;
+        p->SetStringProperty(c, vr::Prop_ControllerType_String, "vive_tracker");
+        p->SetStringProperty(c, vr::Prop_ResourceRoot_String, "htc");
+        p->SetStringProperty(c, vr::Prop_HardwareRevision_String, "14");
+        p->SetUint64Property(c, vr::Prop_HardwareRevision_Uint64, 14U);
+        p->SetBoolProperty(c, vr::Prop_HasDisplayComponent_Bool, false);
+        p->SetStringProperty(c, vr::Prop_NamedIconPathDeviceOff_String, "{htc}/icons/tracker_status_off.png");
+        p->SetStringProperty(c, vr::Prop_NamedIconPathDeviceSearching_String, "{htc}/icons/tracker_status_searching.gif");
+        p->SetStringProperty(c, vr::Prop_NamedIconPathDeviceSearchingAlert_String, "{htc}/icons/tracker_status_searching_alert.gif");
+        p->SetStringProperty(c, vr::Prop_NamedIconPathDeviceReady_String, "{htc}/icons/tracker_status_ready.png");
+        p->SetStringProperty(c, vr::Prop_NamedIconPathDeviceReadyAlert_String, "{htc}/icons/tracker_status_ready_alert.png");
+        p->SetStringProperty(c, vr::Prop_NamedIconPathDeviceNotReady_String, "{htc}/icons/tracker_status_error.png");
+        p->SetStringProperty(c, vr::Prop_NamedIconPathDeviceStandby_String, "{htc}/icons/tracker_status_standby.png");
         p->SetStringProperty(c, vr::Prop_InputProfilePath_String, "{htc}/input/vive_tracker_profile.json");
         p->SetStringProperty(c, vr::Prop_RenderModelName_String, "{htc}vr_tracker_vive_1_0");
-        p->SetInt32Property(c, vr::Prop_ControllerRoleHint_Int32, vr::TrackedControllerRole_OptOut);
+        p->SetInt32Property(c, vr::Prop_ControllerRoleHint_Int32, vr::TrackedControllerRole_Invalid);
         p->SetInt32Property(c, vr::Prop_DeviceClass_Int32, vr::TrackedDeviceClass_GenericTracker);
         // Preset the SteamVR tracker role (changeable in SteamVR > Manage trackers).
         const std::string key = std::string("/devices/kage/") + serial_;
