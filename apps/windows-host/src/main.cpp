@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <cstdio>
 #include <format>
@@ -16,6 +17,7 @@
 #include <thread>
 #include <vector>
 
+#include "kage/crypto/secure.hpp"
 #include "kage/protocol/messages.hpp"
 #include "kage/session/client_link.hpp"
 #include "kage/session/host_service.hpp"
@@ -33,6 +35,18 @@ BOOL WINAPI onCtrl(DWORD) {
 }
 
 void print(const std::string& s) { std::fwrite(s.data(), 1, s.size(), stdout); }
+
+// %LOCALAPPDATA%\KageVR: per-user, holds the PC key, paired headsets, logs.
+std::filesystem::path dataDir() {
+    wchar_t* local = nullptr;
+    size_t len = 0;
+    std::filesystem::path p = L".";
+    if (_wdupenv_s(&local, &len, L"LOCALAPPDATA") == 0 && local) {
+        p = std::filesystem::path(local) / L"KageVR";
+        free(local);
+    }
+    return p;
+}
 
 std::string computerName() {
     wchar_t buf[MAX_COMPUTERNAME_LENGTH + 1];
@@ -151,7 +165,41 @@ int cmdServe(const std::vector<std::string>& a) {
     cfg.controlPort = static_cast<uint16_t>(std::stoi(argValue(a, "--control-port", "47801")));
     kage::session::HostService svc(cfg);
     svc.onEvent = [](const std::string& e) { kage::log::info("{}", e); };
-    svc.onConnect = [](const std::string& client) {
+    const auto dir = dataDir();
+    const auto hostKey = kage::crypto::loadOrCreateKeyPair(dir / L"host.key");
+    if (!hostKey) {
+        kage::log::error("cannot create the PC key in {}", dir.string());
+        return 1;
+    }
+    const auto paired = dir / L"paired.txt";
+    // Pairing: the PC never trusts a headset on its own. The GUI reads the
+    // PAIR_REQUEST line, shows the code and, if the user confirms it matches the
+    // headset, appends the key to paired.txt.
+    svc.onPair = [&, lastShown = std::map<std::string, uint64_t>{}](const kage::protocol::PairRequest& r) mutable {
+        kage::protocol::PairReply reply;
+        reply.hostKey = hostKey->pub;
+        if (kage::crypto::isTrusted(paired, r.clientKey)) {
+            reply.status = kage::protocol::PairStatus::Accepted;
+            return reply;
+        }
+        const auto hex = kage::crypto::toHex(r.clientKey);
+        const uint64_t now = GetTickCount64();
+        if (now - lastShown[hex] > 5000) {
+            lastShown[hex] = now;
+            std::string name = r.clientName;
+            for (char& c : name)
+                if (c == '\n' || c == '\r') c = ' ';
+            print(std::format("PAIR_REQUEST {:06} {} {}\n", kage::crypto::pairingCode(r.clientKey, hostKey->pub), hex, name));
+            std::fflush(stdout);
+        }
+        return reply;
+    };
+    svc.onConnect = [&](const kage::protocol::ConnectRequest& r) {
+        if (!kage::crypto::isTrusted(paired, r.clientKey)) {
+            kage::log::warn("connect request from unpaired headset '{}' refused", r.clientName);
+            return kage::protocol::ConnectStatus::NotPaired;
+        }
+        const auto& client = r.clientName;
         const auto st = launchSteamVr();
         kage::log::info("session requested by '{}': {}", client,
                         st == kage::protocol::ConnectStatus::Launching         ? "launching SteamVR"

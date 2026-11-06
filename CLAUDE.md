@@ -14,7 +14,8 @@ Streaming PCVR PC Windows → Meta Quest (ici **Quest 3S**, `panther`). Réponse
 - `apps/quest-client/` APK NativeActivity (OpenXR + GLES3), Gradle 9.9 / AGP 9.5.1, compileSdk 37, NDK 27.2.12479018.
 - `drivers/steamvr/` pilote OpenVR (DLL chargée par vrserver.exe) = moteur de streaming PC.
 - `apps/windows-gui/` interface WPF (.NET).
-- `third_party/` en-têtes OpenVR (BSD-3) et AMF (MIT).
+- `third_party/` en-têtes OpenVR (BSD-3), AMF (MIT), Monocypher 4.0.2 (BSD-2/CC0, sha256 paquet 38d07179…879c), stb_truetype.
+- Sécurité : `core/include/kage/crypto/secure.hpp`. Clés PC `%LOCALAPPDATA%KageVRhost.key` + `paired.txt` (lus par kage-host ET le pilote) ; casque `client.key` + `hosts.txt` dans internalDataPath. Seul `SecureHello`/`SecureAccept` passe en clair sur 47802.
 - `tests/` harness maison `tests/test_main.hpp` + CTest.
 
 ## Commandes (PowerShell)
@@ -38,4 +39,4 @@ Win11 Pro, Ryzen 5 5600X, RX 6700 XT (AMF 1.4.37, HEVC+H.264 matériel, **pas d'
 47800 découverte · 47801 contrôle (kage-host) · 47802 streaming (pilote SteamVR).
 
 ## Architecture du streaming
-Quest → `StreamHello` (FOV, IPD, Hz, résolution) → pilote ; Quest → `TrackingState` à chaque frame ; pilote → `VideoFrame` fragmenté (HEVC AMF, côte à côte, pose de rendu incluse) ; Quest soumet la couche de projection avec **la pose de rendu** pour que le runtime fasse la reprojection. Images incomplètes abandonnées + demande IDR. Audio PCM brut 48 kHz (≈1,5 Mbit/s, pas de codec = pas de latence).
+Quest → `StreamHello` (FOV, IPD, Hz, résolution) → pilote ; Quest → `TrackingState` à chaque frame ; pilote → `VideoFrame` fragmenté (HEVC AMF, côte à côte, pose de rendu incluse) ; Quest soumet la couche de projection avec **la pose de rendu** pour que le runtime fasse la reprojection. Images incomplètes abandonnées + demande IDR. Audio : canal 5, u32 fréquence + PCM int16 stéréo. Avant tout : PairRequest (47801, code 6 chiffres confirmé dans la GUI) puis SecureHello/SecureAccept (47802), ensuite tout est chiffré (+24 o/paquet).

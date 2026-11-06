@@ -97,9 +97,20 @@ void HostService::controlLoop() {
             continue;
         }
         auto msg = decodeMessage(body);
+        if (const auto* pr = msg ? std::get_if<PairRequest>(&*msg) : nullptr) {
+            if (!onPair) continue;
+            encodeMessage(onPair(*pr), payload);
+            PacketHeader rh;
+            rh.channel = Channel::Control;
+            rh.sequence = seq++;
+            rh.sendTimeUs = monotonicMicros();
+            encodePacket(rh, payload, out);
+            control_.sendTo(from, out);
+            continue;
+        }
         if (const auto* cr = msg ? std::get_if<ConnectRequest>(&*msg) : nullptr) {
             ConnectReply reply;
-            reply.status = onConnect ? onConnect(cr->clientName) : ConnectStatus::Failed;
+            reply.status = onConnect ? onConnect(*cr) : ConnectStatus::Failed;
             encodeMessage(reply, payload);
             PacketHeader rh;
             rh.channel = Channel::Control;

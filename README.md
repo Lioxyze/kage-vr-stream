@@ -10,7 +10,8 @@ Plateforme open source de streaming PCVR (Wi-Fi, et à terme USB-C) entre un PC 
 2. Lancer `build\gui\KageVR.exe`, puis cliquer sur **Installer le pilote SteamVR** (une seule fois).
 3. Dans le casque : *Bibliothèque > Sources inconnues > KAGÉ VR Stream*, puis viser ton PC avec la manette et appuyer sur la gâchette.
 4. SteamVR se lance tout seul sur le PC. Au premier lancement, faire **Configuration de la pièce > Debout uniquement**.
-5. Pendant la session : **appui long sur le bouton Menu gauche** pour afficher les statistiques ou se déconnecter.
+5. Première connexion : le casque affiche un code à 6 chiffres, le PC ouvre une fenêtre avec un code. Accepter seulement s'ils sont identiques.
+6. Pendant la session : **appui long sur le bouton Menu gauche** pour afficher les statistiques ou se déconnecter.
 
 ## Structure
 

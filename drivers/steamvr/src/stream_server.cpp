@@ -13,7 +13,14 @@ namespace kage::driver {
 
 using namespace kage::protocol;
 
-bool StreamServer::start(uint16_t port) {
+bool StreamServer::start(uint16_t port, const std::filesystem::path& dataDir) {
+    auto key = crypto::loadOrCreateKeyPair(dataDir / L"host.key");
+    if (!key) {
+        log::error("stream: cannot load or create the PC key in {}", dataDir.string());
+        return false;
+    }
+    hostKey_ = *key;
+    pairedFile_ = dataDir / L"paired.txt";
     auto s = net::UdpSocket::open(port, 0, false);
     if (!s) {
         log::error("stream: cannot bind udp/{} ({})", port, net::UdpSocket::lastErrorString());
@@ -61,7 +68,7 @@ StreamConfig StreamServer::makeConfig(const StreamHello& h) const {
 
 void StreamServer::recvLoop() {
     std::array<uint8_t, kMaxDatagram> buf{};
-    std::vector<uint8_t> payload;
+    std::vector<uint8_t> payload, plain;
     while (running_) {
         size_t n = 0;
         net::Endpoint from;
@@ -69,15 +76,25 @@ void StreamServer::recvLoop() {
         PacketHeader h;
         std::span<const uint8_t> body;
         if (decodePacket({buf.data(), n}, h, body) != DecodeError::None) continue;
-        auto msg = decodeMessage(body);
+        if (!(h.flags & kFlagEncrypted)) {
+            // Only the key exchange travels in clear; everything else must be sealed.
+            auto msg = decodeMessage(body);
+            if (auto* sh = msg ? std::get_if<SecureHello>(&*msg) : nullptr) handleSecureHello(*sh, from);
+            continue;
+        }
+        {
+            std::lock_guard l(mutex_);
+            if (!client_ || !(*client_ == from)) continue;
+        }
+        // open() is only ever called from this thread; init() happens on this thread too.
+        if (!session_.open({buf.data(), n}, h, body, plain)) continue;
+        auto msg = decodeMessage(plain);
         if (!msg) continue;
 
         if (auto* hello = std::get_if<StreamHello>(&*msg)) {
             StreamConfig cfg;
             {
                 std::lock_guard l(mutex_);
-                if (!client_ || !(*client_ == from)) log::info("stream: client {} connected", from.toString());
-                client_ = from;
                 if (!hello_) hello_ = *hello;  // display geometry is fixed for the session
                 if (!config_) config_ = makeConfig(*hello_);
                 cfg = *config_;
@@ -86,10 +103,6 @@ void StreamServer::recvLoop() {
             encodeMessage(cfg, payload);
             send(Channel::Control, payload);
             continue;
-        }
-        {
-            std::lock_guard l(mutex_);
-            if (!client_ || !(*client_ == from)) continue;  // only the client that said hello
         }
         lastRecvUs_ = monotonicMicros();
         if (auto* t = std::get_if<TrackingState>(&*msg)) {
@@ -114,12 +127,45 @@ void StreamServer::send(Channel ch, std::span<const uint8_t> payload) {
     }
     if (!to) return;
     std::lock_guard l(sendMutex_);
+    if (!session_.active()) return;  // never send video/tracking/audio in clear
     PacketHeader h;
     h.channel = ch;
     h.sequence = seq_[static_cast<int>(ch)]++;
     h.sendTimeUs = monotonicMicros();
-    encodePacket(h, payload, packet_);
+    session_.seal(h, payload, packet_);
     sock_.sendTo(*to, packet_);
+}
+
+void StreamServer::handleSecureHello(const SecureHello& sh, const net::Endpoint& from) {
+    if (!crypto::isTrusted(pairedFile_, sh.clientStatic)) {
+        log::warn("stream: hello from unpaired headset {} ignored", from.toString());
+        return;
+    }
+    std::vector<uint8_t> payload, out;
+    std::lock_guard sl(sendMutex_);
+    if (!(session_.active() && sh.clientEphemeral == sessionEph_)) {
+        // New session (first connection or headset restarted): fresh ephemeral key.
+        auto eph = crypto::KeyPair::generate();
+        if (!eph) return;
+        auto keys = crypto::deriveHost(hostKey_, *eph, sh.clientStatic, sh.clientEphemeral);
+        if (!keys) return;
+        lastAccept_.hostEphemeral = eph->pub;
+        lastAccept_.confirm = keys->confirm;
+        eph->wipe();
+        session_.init(*keys);
+        crypto::wipe(keys->send.data(), 32);
+        crypto::wipe(keys->recv.data(), 32);
+        sessionEph_ = sh.clientEphemeral;
+        std::lock_guard l(mutex_);
+        client_ = from;
+        log::info("stream: encrypted session with {} established", from.toString());
+    }
+    encodeMessage(lastAccept_, payload);
+    PacketHeader h;
+    h.channel = Channel::Control;
+    h.sendTimeUs = monotonicMicros();
+    encodePacket(h, payload, out);
+    sock_.sendTo(from, out);
 }
 
 void StreamServer::sendVideo(uint32_t frameIndex, bool keyframe, const VideoFrameMeta& meta,

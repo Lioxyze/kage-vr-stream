@@ -8,8 +8,19 @@ namespace kp = kage::protocol;
 namespace klog = kage::log;
 using kage::monotonicMicros;
 
-void StreamClient::start(const kage::net::Endpoint& driver, const kp::StreamHello& hello) {
+void StreamClient::start(const kage::net::Endpoint& driver, const kp::StreamHello& hello,
+                         const kage::crypto::KeyPair& identity, const kage::crypto::Key& hostKey) {
     stop();
+    auto eph = kage::crypto::KeyPair::generate();  // fresh per session: forward secrecy
+    if (!eph) {
+        klog::error("stream: no randomness for the session key");
+        return;
+    }
+    identity_ = identity;
+    ephemeral_ = *eph;
+    hostKey_ = hostKey;
+    session_.reset();
+    secured_ = false;
     auto s = kage::net::UdpSocket::open(0, 0, false);
     if (!s) {
         klog::error("stream: cannot open socket");
@@ -33,6 +44,9 @@ void StreamClient::stop() {
     if (thread_.joinable()) thread_.join();
     audio_.close();
     decoder_ = nullptr;
+    session_.reset();
+    ephemeral_.wipe();
+    secured_ = false;
 }
 
 std::optional<kp::StreamConfig> StreamClient::config() const {
@@ -70,7 +84,12 @@ void StreamClient::send(kp::Channel ch, const kp::Message& m) {
     h.channel = ch;
     h.sequence = seq_[static_cast<int>(ch)]++;
     h.sendTimeUs = monotonicMicros();
-    kp::encodePacket(h, payload_, packet_);
+    if (std::holds_alternative<kp::SecureHello>(m)) {
+        kp::encodePacket(h, payload_, packet_);  // key exchange: the only clear message
+    } else {
+        if (!session_.active()) return;
+        session_.seal(h, payload_, packet_);
+    }
     sock_.sendTo(driver_, packet_);
 }
 
@@ -90,11 +109,14 @@ void StreamClient::loop() {
 
     while (running_) {
         const uint64_t now = monotonicMicros();
-        if (!config() && now - lastHello > 250'000) {
+        if (!secured_ && now - lastHello > 250'000) {
+            send(kp::Channel::Control, kp::SecureHello{identity_.pub, ephemeral_.pub});
+            lastHello = now;
+        } else if (secured_ && !config() && now - lastHello > 250'000) {
             send(kp::Channel::Control, hello_);
             lastHello = now;
         }
-        if (now - lastPing > 250'000) {
+        if (secured_ && now - lastPing > 250'000) {
             pingSent[pingId % 64] = now;
             send(kp::Channel::Control, kp::Ping{pingId++, now});
             lastPing = now;
@@ -132,6 +154,27 @@ void StreamClient::loop() {
         kp::PacketHeader h;
         std::span<const uint8_t> body;
         if (kp::decodePacket({buf.data(), n}, h, body) != kp::DecodeError::None) continue;
+        if (!(h.flags & kp::kFlagEncrypted)) {
+            auto m = kp::decodeMessage(body);
+            const auto* sa = m ? std::get_if<kp::SecureAccept>(&*m) : nullptr;
+            if (!sa || secured_) continue;
+            auto keys = kage::crypto::deriveClient(identity_, ephemeral_, hostKey_, sa->hostEphemeral);
+            if (!keys || !kage::crypto::equal16(keys->confirm, sa->confirm)) {
+                klog::warn("stream: the PC did not prove its paired key, ignoring");
+                continue;
+            }
+            {
+                std::lock_guard l(sendMutex_);
+                session_.init(*keys);
+            }
+            kage::crypto::wipe(&*keys, sizeof *keys);
+            secured_ = true;
+            lastHello = 0;  // send the StreamHello right away
+            klog::info("stream: encrypted session established");
+            continue;
+        }
+        if (!session_.open({buf.data(), n}, h, body, plain_)) continue;
+        body = plain_;
 
         if (h.channel == kp::Channel::Video) {
             bytes += n;

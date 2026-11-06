@@ -35,7 +35,7 @@ enum VideoFrameFlags : uint8_t {
 
 inline constexpr uint32_t kMaxFrameSize = 8u * 1024u * 1024u;  // 8 MiB per encoded frame
 inline constexpr size_t kMaxVideoPayload =
-    kMaxDatagram - PacketHeader::kSize - VideoFragmentHeader::kSize - 16 /* AEAD tag, Phase 2 */;
+    kMaxDatagram - PacketHeader::kSize - VideoFragmentHeader::kSize - 24 /* crypto::SecureSession::kOverhead */;
 
 // Produces the payloads (fragment header + data) for one encoded frame. Each
 // payload fits in kMaxVideoPayload + VideoFragmentHeader::kSize bytes.

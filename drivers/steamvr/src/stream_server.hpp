@@ -11,6 +11,9 @@
 #include <thread>
 #include <vector>
 
+#include <filesystem>
+
+#include "kage/crypto/secure.hpp"
 #include "kage/net/udp_socket.hpp"
 #include "kage/protocol/messages.hpp"
 #include "kage/protocol/packet.hpp"
@@ -23,7 +26,8 @@ public:
     std::function<void()> onIdrRequest;
     std::function<void(const protocol::ClientStats&)> onStats;
 
-    bool start(uint16_t port);
+    // dataDir holds host.key and paired.txt (shared with kage-host).
+    bool start(uint16_t port, const std::filesystem::path& dataDir);
     void stop();
 
     // First StreamHello received (and the config we answered with).
@@ -39,6 +43,7 @@ public:
 
 private:
     void recvLoop();
+    void handleSecureHello(const protocol::SecureHello& h, const net::Endpoint& from);
     void send(protocol::Channel ch, std::span<const uint8_t> payload);
     protocol::StreamConfig makeConfig(const protocol::StreamHello& h) const;
 
@@ -50,7 +55,12 @@ private:
     std::optional<protocol::StreamHello> hello_;
     std::optional<protocol::StreamConfig> config_;
     std::atomic<uint64_t> lastRecvUs_{0};
-    std::mutex sendMutex_;
+    std::mutex sendMutex_;  // also guards session_ (counter) and the send buffers
+    crypto::KeyPair hostKey_;
+    std::filesystem::path pairedFile_;
+    crypto::SecureSession session_;
+    protocol::PublicKey sessionEph_{};       // client ephemeral of the current session
+    protocol::SecureAccept lastAccept_{};    // re-sent if the client repeats its hello
     uint32_t seq_[6] = {};
     std::vector<uint8_t> frameBuf_, packet_, audioBuf_;
 };

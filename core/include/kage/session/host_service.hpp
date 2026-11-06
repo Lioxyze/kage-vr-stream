@@ -44,7 +44,8 @@ public:
     // Optional hooks, called from the service threads (must be thread-safe).
     std::function<void(const std::string&)> onEvent;
     // Headset asked to start a session; returns what to answer. Unset = Failed.
-    std::function<protocol::ConnectStatus(const std::string& clientName)> onConnect;
+    std::function<protocol::ConnectStatus(const protocol::ConnectRequest&)> onConnect;
+    std::function<protocol::PairReply(const protocol::PairRequest&)> onPair;
 
 private:
     void discoveryLoop();

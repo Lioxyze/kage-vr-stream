@@ -27,7 +27,10 @@ public:
 
     // Asks the host to start SteamVR. Returns the host's answer or nullopt on timeout.
     std::optional<protocol::ConnectReply> requestConnect(const net::Endpoint& control, const std::string& clientName,
-                                                         int timeoutMs);
+                                                         const protocol::PublicKey& clientKey, int timeoutMs);
+    // Pairing step: the host answers Pending (user must confirm the code on the PC) or Accepted.
+    std::optional<protocol::PairReply> requestPair(const net::Endpoint& control, const std::string& clientName,
+                                                   const protocol::PublicKey& clientKey, int timeoutMs);
 
     // One Ping/Pong round trip. Updates clock() on success and returns the sample.
     std::optional<sync::ClockSample> ping(const net::Endpoint& control, int timeoutMs);
@@ -37,6 +40,9 @@ public:
     uint64_t pongsReceived() const { return pongsReceived_; }
 
 private:
+    template <class Reply>
+    std::optional<Reply> request(const net::Endpoint& control, const protocol::Message& msg, int timeoutMs);
+
     net::UdpSocket sock_;
     sync::ClockSync clock_;
     uint32_t nextPingId_ = 1;

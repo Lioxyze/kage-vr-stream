@@ -469,10 +469,11 @@ class Provider : public vr::IServerTrackedDeviceProvider {
 public:
     vr::EVRInitError Init(vr::IVRDriverContext* ctx) override {
         VR_INIT_SERVER_DRIVER_CONTEXT(ctx);
+        std::filesystem::path dir = L".";
         wchar_t* local = nullptr;
         size_t len = 0;
         if (_wdupenv_s(&local, &len, L"LOCALAPPDATA") == 0 && local) {
-            auto dir = std::filesystem::path(local) / L"KageVR";
+            dir = std::filesystem::path(local) / L"KageVR";
             free(local);
             std::error_code ec;
             std::filesystem::create_directories(dir, ec);
@@ -490,7 +491,7 @@ public:
         server_.onStats = [this](const kp::ClientStats& s) {
             if (auto* h = hmd_.load()) h->onStats(s);
         };
-        if (!server_.start(kp::kDefaultStreamPort)) return vr::VRInitError_Driver_Failed;
+        if (!server_.start(kp::kDefaultStreamPort, dir)) return vr::VRInitError_Driver_Failed;
         audio_.enabled = [this] { return server_.clientActive(); };
         audio_.onChunk = [this](uint32_t rate, std::span<const int16_t> pcm) { server_.sendAudio(rate, pcm); };
         audio_.start();

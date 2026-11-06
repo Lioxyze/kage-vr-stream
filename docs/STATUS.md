@@ -20,7 +20,7 @@ Dernière mise à jour : 2026-11-06. Matériel de test : RX 6700 XT + **Meta Que
 | Calibration automatique de la prédiction de pose | 🟡 | active, non mesurée casque porté |
 | Jeu PCVR réel testé | ❌ | à faire, casque porté |
 | Audio PC → casque | 🟡 | écrit et compilé (capture WASAPI de la sortie par défaut, PCM 16 bits brut ≈1,5 Mbit/s, AAudio basse latence, tampon 30 ms), pas encore testé dans le casque. Le son joue aussi sur le PC. Micro : non |
-| Chiffrement et appairage | ❌ | **le flux circule en clair sur le réseau local** |
+| Chiffrement et appairage | 🟡 | écrit, compilé, testé en unitaire (7 tests), pas encore testé avec le casque. Appairage par code à 6 chiffres comparé casque/PC ; échange de clés X25519 statiques + éphémères (authentification mutuelle, confidentialité persistante) ; XChaCha20-Poly1305 par paquet, anti-rejeu. Bibliothèque : Monocypher 4.0.2. Restent en clair : découverte et demande de lancement de SteamVR (sans données sensibles) |
 | USB-C | ❌ | |
 
 ## Mesures réelles (session SteamVR, 90 Hz, HEVC 3360×1760)
@@ -38,7 +38,7 @@ Dernière mise à jour : 2026-11-06. Matériel de test : RX 6700 XT + **Meta Que
 
 ## Composants
 
-- `core` : protocole, fragmentation, horloge, statistiques, UDP. 27 tests ✅.
+- `core` : protocole, fragmentation, horloge, statistiques, UDP, chiffrement (`kage/crypto`). 5 suites de tests ✅.
 - `kage-host` : probe, serve (découverte + lancement de SteamVR), install-driver/remove-driver ✅.
 - `drivers/steamvr` : pilote OpenVR, composition D3D11, AMF HEVC/H.264 (H.264 non testé), débit adaptatif, `stats.json` ✅.
 - `apps/windows-gui` : interface WPF (états, tableau de bord en direct, diagnostic, journal) ✅.

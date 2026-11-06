@@ -10,12 +10,14 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <filesystem>
 #include <format>
 #include <map>
 #include <mutex>
 #include <string>
 #include <thread>
 
+#include "kage/crypto/secure.hpp"
 #include "kage/protocol/messages.hpp"
 #include "kage/session/client_link.hpp"
 #include "kage/util/log.hpp"
@@ -47,10 +49,24 @@ public:
         uint64_t lastSeenUs = 0;
         float rttMs = -1;
     };
-    void start() { thread_ = std::thread(&Lan::run, this); }
+    struct ConnectResult {
+        std::optional<kp::ConnectReply> reply;
+        kage::crypto::Key hostKey{};
+        std::string error;
+    };
+    void start(const kage::crypto::KeyPair& id, std::filesystem::path hostsFile) {
+        id_ = id;
+        hostsFile_ = std::move(hostsFile);
+        thread_ = std::thread(&Lan::run, this);
+    }
     void stop() {
         stop_ = true;
         if (thread_.joinable()) thread_.join();
+    }
+    void cancel() { cancel_ = true; }
+    std::optional<uint32_t> pairingCode() const {
+        std::lock_guard l(m_);
+        return code_;
     }
     std::vector<Host> hosts() const {
         std::lock_guard l(m_);
@@ -62,10 +78,11 @@ public:
     void requestConnect(const kage::net::Endpoint& ep) {
         std::lock_guard l(m_);
         connectTo_ = ep;
-        reply_.reset();
+        reply_ = {};
         replyReady_ = false;
+        cancel_ = false;
     }
-    bool takeReply(std::optional<kp::ConnectReply>& r) {
+    bool takeReply(ConnectResult& r) {
         std::lock_guard l(m_);
         if (!replyReady_) return false;
         r = reply_;
@@ -87,8 +104,9 @@ private:
                 connectTo_.reset();
             }
             if (target) {
-                auto r = link.requestConnect(*target, name, 1500);
+                auto r = pairAndConnect(link, *target, name);
                 std::lock_guard l(m_);
+                code_.reset();
                 reply_ = r;
                 replyReady_ = true;
                 continue;
@@ -108,13 +126,58 @@ private:
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
     }
+    // Pairing then connect. A PC key is trusted only if it was paired before, or
+    // if it is the key whose code the user saw here while confirming on the PC.
+    ConnectResult pairAndConnect(kage::session::ClientLink& link, const kage::net::Endpoint& target, const std::string& name) {
+        ConnectResult res;
+        std::optional<kage::crypto::Key> shown;
+        const uint64_t deadline = monotonicMicros() + 180'000'000;
+        while (!stop_ && !cancel_) {
+            auto pr = link.requestPair(target, name, id_.pub, 800);
+            if (!pr) {
+                res.error = "Le PC ne répond pas (KageVR lancé sur le PC ? pare-feu ?)";
+                return res;
+            }
+            if (pr->status == kp::PairStatus::Accepted) {
+                if (!kage::crypto::isTrusted(hostsFile_, pr->hostKey) && !(shown && *shown == pr->hostKey)) {
+                    res.error = "Clé du PC inconnue : oublie ce casque dans KageVR sur le PC puis réessaie";
+                    return res;
+                }
+                kage::crypto::addTrusted(hostsFile_, pr->hostKey, "PC");
+                res.hostKey = pr->hostKey;
+                res.reply = link.requestConnect(target, name, id_.pub, 1500);
+                if (!res.reply) res.error = "Le PC ne répond pas";
+                return res;
+            }
+            if (shown && *shown != pr->hostKey) {
+                res.error = "La clé du PC a changé pendant l'appairage : annulé";
+                return res;
+            }
+            shown = pr->hostKey;
+            {
+                std::lock_guard l(m_);
+                code_ = kage::crypto::pairingCode(id_.pub, pr->hostKey);
+            }
+            if (monotonicMicros() > deadline) {
+                res.error = "Appairage non confirmé sur le PC";
+                return res;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        }
+        res.error = "Annulé";
+        return res;
+    }
+
     std::thread thread_;
-    std::atomic<bool> stop_{false};
+    std::atomic<bool> stop_{false}, cancel_{false};
     mutable std::mutex m_;
     std::map<uint32_t, Host> hosts_;
     std::optional<kage::net::Endpoint> connectTo_;
-    std::optional<kp::ConnectReply> reply_;
+    ConnectResult reply_;
     bool replyReady_ = false;
+    std::optional<uint32_t> code_;
+    kage::crypto::KeyPair id_;
+    std::filesystem::path hostsFile_;
 };
 
 // ---------------------------------------------------------------------------
@@ -180,11 +243,19 @@ enum ButtonId { kBtnHost0 = 100, kBtnRate0 = 200, kBtnDisconnect = 300, kBtnResu
 // ---------------------------------------------------------------------------
 class App {
 public:
-    explicit App(XrApp& xr) : xr_(xr) {}
+    App(XrApp& xr, std::filesystem::path dataDir) : xr_(xr), dataDir_(std::move(dataDir)) {}
 
     void start() {
         renderer_.init();
-        lan_.start();
+        // App-private storage: this headset's identity key and the PCs it trusts.
+        auto id = kage::crypto::loadOrCreateKeyPair(dataDir_ / "client.key");
+        if (!id) {
+            klog::error("cannot create the headset key in {}", dataDir_.string());
+            status_ = "Erreur : clé du casque impossible à créer";
+        } else {
+            identity_ = *id;
+        }
+        lan_.start(identity_, dataDir_ / "hosts.txt");
         const auto& rates = xr_.refreshRates();
         if (std::find(rates.begin(), rates.end(), 90.f) != rates.end()) xr_.setRefreshRate(90.f);  // smooth default
     }
@@ -245,14 +316,22 @@ private:
         lan_.requestConnect(h.control);
         mode_ = Mode::Connecting;
         connectStartUs_ = monotonicMicros();
-        status_ = "Demande envoyée au PC…";
+        status_ = "Connexion au PC…";
     }
 
     void updateConnecting() {
-        std::optional<kp::ConnectReply> reply;
-        if (lan_.takeReply(reply)) {
+        pairCode_ = lan_.pairingCode();
+        if (pairCode_) status_ = "Vérifie que le PC affiche le même code, puis accepte sur le PC";
+        Lan::ConnectResult res;
+        if (lan_.takeReply(res)) {
+            const auto& reply = res.reply;
             if (!reply) {
-                status_ = "Le PC ne répond pas (kage-host lancé ? pare-feu ?)";
+                status_ = res.error;
+                mode_ = Mode::Lobby;
+                return;
+            }
+            if (reply->status == kp::ConnectStatus::NotPaired) {
+                status_ = "Ce casque n'est pas appairé avec ce PC";
                 mode_ = Mode::Lobby;
                 return;
             }
@@ -274,7 +353,7 @@ private:
             hello.ipdMeters = std::clamp(ipd, 0.045f, 0.085f);
             hello.codecs = kp::kCodecHEVC | kp::kCodecH264;
             hello.maxBitrateKbps = 150'000;
-            stream_.start({target_.control.ipv4, reply->streamPort}, hello);
+            stream_.start({target_.control.ipv4, reply->streamPort}, hello, identity_, res.hostKey);
         }
         if (stream_.running()) {
             const auto cfg = stream_.config();
@@ -385,12 +464,14 @@ private:
         const float top = panel_.height / 2;
         if (mode_ == Mode::Lobby || mode_ == Mode::Connecting) {
             hosts_ = lan_.hosts();
-            for (size_t i = 0; i < hosts_.size() && i < 3; ++i)
+            for (size_t i = 0; i < hosts_.size() && i < 3 && !pairCode_; ++i)
                 buttons_.push_back({0, top - 0.20f - i * 0.085f, 0.78f, 0.07f, "", kBtnHost0 + static_cast<int>(i),
                                     mode_ == Mode::Lobby});
             const auto& rates = xr_.refreshRates();
             const float bw = 0.12f;
-            for (size_t i = 0; i < rates.size() && i < 5; ++i)
+            if (mode_ == Mode::Connecting)
+                buttons_.push_back({0.30f, -top + 0.10f, 0.22f, 0.06f, "Annuler", kBtnDisconnect});
+            for (size_t i = 0; i < rates.size() && i < 5 && mode_ == Mode::Lobby; ++i)
                 buttons_.push_back({-0.30f + i * (bw + 0.02f), -top + 0.10f, bw, 0.06f,
                                     std::format("{} Hz", static_cast<int>(rates[i] + 0.5f)), kBtnRate0 + static_cast<int>(i),
                                     mode_ == Mode::Lobby});
@@ -409,6 +490,9 @@ private:
             const size_t i = static_cast<size_t>(id - kBtnRate0);
             if (i < xr_.refreshRates().size()) xr_.setRefreshRate(xr_.refreshRates()[i]);
         } else if (id == kBtnDisconnect) {
+            lan_.cancel();
+            pairCode_.reset();
+            status_.clear();
             disconnect();
         } else if (id == kBtnResume) {
             overlay_ = false;
@@ -542,6 +626,14 @@ private:
                              xr_.refreshRate()));
             return;
         }
+        if (mode_ == Mode::Connecting && pairCode_) {
+            renderer_.text(m, left, top - 0.15f, 0.024f, std::format("Appairage avec {}", target_.name), palette::kText);
+            const auto code = std::format("{:03} {:03}", *pairCode_ / 1000, *pairCode_ % 1000);
+            const float tw = renderer_.textWidth(code, 0.09f);
+            renderer_.text(m, -tw / 2, -0.02f, 0.09f, code, palette::kCyan);
+            if (!status_.empty()) renderer_.text(m, left, -top + 0.035f, 0.02f, status_, palette::kWarn);
+            return;
+        }
         renderer_.text(m, left, top - 0.13f, 0.022f, "Ordinateurs sur le réseau local", palette::kDim);
         if (hosts_.empty())
             renderer_.text(m, left, top - 0.21f, 0.024f, "Recherche… (lancer kage-host sur le PC)", palette::kDim);
@@ -571,6 +663,9 @@ private:
     bool triggerWasDown_[2] = {}, pokeDown_[2] = {};
     std::vector<XrVector3f> rays_;
     std::string status_;
+    std::filesystem::path dataDir_;
+    kage::crypto::KeyPair identity_;
+    std::optional<uint32_t> pairCode_;
     uint64_t connectStartUs_ = 0, lostSinceUs_ = 0, menuDownAt_ = 0;
     bool menuWasDown_ = false, autoTried_ = false;
     FrameContext ctx_;
@@ -592,7 +687,7 @@ void android_main(android_app* app) {
         klog::error("OpenXR initialisation failed");
         ANativeActivity_finish(app->activity);
     }
-    App ui(xr);
+    App ui(xr, app->activity->internalDataPath ? app->activity->internalDataPath : "/data/local/tmp");
     if (xrReady) ui.start();
 
     bool finishing = !xrReady;

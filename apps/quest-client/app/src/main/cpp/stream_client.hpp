@@ -8,6 +8,7 @@
 #include <optional>
 #include <thread>
 
+#include "kage/crypto/secure.hpp"
 #include "kage/net/udp_socket.hpp"
 #include "kage/protocol/messages.hpp"
 #include "kage/protocol/video_fragment.hpp"
@@ -26,7 +27,10 @@ struct StreamStats {
 
 class StreamClient {
 public:
-    void start(const kage::net::Endpoint& driver, const kage::protocol::StreamHello& hello);
+    // identity = this headset's key pair; hostKey = the paired PC's public key.
+    void start(const kage::net::Endpoint& driver, const kage::protocol::StreamHello& hello,
+               const kage::crypto::KeyPair& identity, const kage::crypto::Key& hostKey);
+    bool secured() const { return secured_; }
     void stop();
     bool running() const { return running_; }
 
@@ -62,5 +66,11 @@ private:
     std::vector<uint8_t> payload_, packet_;
     kage::sync::ClockSync clock_;
     AudioPlayer audio_;  // fed and reopened from the network thread only
+
+    kage::crypto::KeyPair identity_, ephemeral_;
+    kage::crypto::Key hostKey_{};
+    kage::crypto::SecureSession session_;  // seal under sendMutex_, open on the network thread
+    std::atomic<bool> secured_{false};
+    std::vector<uint8_t> plain_;
     bool loggedFirst_ = false;
 };

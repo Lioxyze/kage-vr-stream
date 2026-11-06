@@ -81,7 +81,12 @@ public partial class MainWindow : Window
         _service = Process.Start(psi);
         if (_service == null) return;
         _service.ErrorDataReceived += (_, e) => { if (e.Data != null && !e.Data.Contains("discovery probe")) Log(e.Data); };
-        _service.OutputDataReceived += (_, e) => { if (e.Data != null) Log(e.Data); };
+        _service.OutputDataReceived += (_, e) =>
+        {
+            if (e.Data == null) return;
+            if (e.Data.StartsWith("PAIR_REQUEST ")) Dispatcher.BeginInvoke(() => OnPairRequest(e.Data));
+            else Log(e.Data);
+        };
         _service.BeginErrorReadLine();
         _service.BeginOutputReadLine();
     }
@@ -125,6 +130,41 @@ public partial class MainWindow : Window
         DiagnosticText.Text = "Analyse en cours…";
         DiagnosticText.Text = await RunHost("probe");
         ((TabControl)DiagnosticText.Parent).SelectedIndex = 1;
+    }
+
+    // ---- pairing --------------------------------------------------------------------
+    // "PAIR_REQUEST <code> <64 hex key> <name>" from kage-host. The user compares the
+    // code with the one in the headset; only then is the key added to paired.txt.
+    private readonly HashSet<string> _pairDialogs = new();
+    private string PairedFile => Path.Combine(_dataDir, "paired.txt");
+
+    private void OnPairRequest(string line)
+    {
+        var parts = line.Split(' ', 4);
+        if (parts.Length < 3 || parts[1].Length != 6 || parts[2].Length != 64 || !_pairDialogs.Add(parts[2])) return;
+        var name = parts.Length > 3 ? parts[3] : "Casque";
+        var code = $"{parts[1][..3]} {parts[1][3..]}";
+        Log($"Demande d'appairage de « {name} », code {code}.");
+        var ok = MessageBox.Show(this, $"Le casque « {name} » demande à se connecter.\n\nCode : {code}\n\n" +
+                                       "Accepter seulement si le casque affiche exactement le même code.",
+                                 "Appairage KAGÉ", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
+        if (ok)
+        {
+            Directory.CreateDirectory(_dataDir);
+            File.AppendAllText(PairedFile, $"{parts[2]} {name.Replace('\n', ' ')}\n");
+            Log($"Casque « {name} » appairé.");
+        }
+        else Log($"Appairage de « {name} » refusé.");
+        _pairDialogs.Remove(parts[2]);
+    }
+
+    private void OnForgetPaired(object s, RoutedEventArgs e)
+    {
+        if (!File.Exists(PairedFile)) { Log("Aucun casque appairé."); return; }
+        if (MessageBox.Show(this, "Oublier tous les casques appairés ? Ils devront refaire l'appairage par code.", "Appairage",
+                            MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
+        File.Delete(PairedFile);
+        Log("Casques appairés oubliés.");
     }
 
     // ---- state ----------------------------------------------------------------------

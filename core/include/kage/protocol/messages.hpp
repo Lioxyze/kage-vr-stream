@@ -35,6 +35,10 @@ enum class MessageType : uint8_t {
     IdrRequest = 42,      // client -> driver: lost reference, need a keyframe
     Haptics = 43,         // driver -> client
     ClientStats = 44,     // client -> driver, ~1 Hz, feeds bitrate control
+    PairRequest = 32,     // client -> kage-host, repeated while the user compares the code
+    PairReply = 33,
+    SecureHello = 50,     // client -> driver: static + ephemeral X25519 keys (clear)
+    SecureAccept = 51,    // driver -> client: ephemeral key + key confirmation (clear)
 };
 
 inline constexpr uint16_t kDefaultStreamPort = 47802;
@@ -134,11 +138,35 @@ struct TrackingState {
     std::array<ControllerState, 2> controllers{};
 };
 
+using PublicKey = std::array<uint8_t, 32>;
+
 struct ConnectRequest {
     std::string clientName;
+    PublicKey clientKey{};  // must be paired with this PC
 };
 
-enum class ConnectStatus : uint8_t { Launching = 0, AlreadyRunning = 1, SteamVrMissing = 2, Failed = 3 };
+enum class ConnectStatus : uint8_t { Launching = 0, AlreadyRunning = 1, SteamVrMissing = 2, Failed = 3, NotPaired = 4 };
+
+struct PairRequest {
+    std::string clientName;
+    PublicKey clientKey{};
+};
+
+enum class PairStatus : uint8_t { Pending = 0, Accepted = 1 };
+
+struct PairReply {
+    PairStatus status = PairStatus::Pending;
+    PublicKey hostKey{};  // both sides show a code derived from the two keys
+};
+
+struct SecureHello {
+    PublicKey clientStatic{}, clientEphemeral{};
+};
+
+struct SecureAccept {
+    PublicKey hostEphemeral{};
+    std::array<uint8_t, 16> confirm{};  // proves the driver holds the PC's static key
+};
 
 struct ConnectReply {
     ConnectStatus status = ConnectStatus::Failed;
@@ -198,7 +226,8 @@ void encodeFrameMeta(const VideoFrameMeta& m, std::vector<uint8_t>& out);  // ap
 bool decodeFrameMeta(std::span<const uint8_t> in, VideoFrameMeta& m);
 
 using Message = std::variant<DiscoveryProbe, DiscoveryAnnounce, Ping, Pong, Heartbeat, Disconnect, TrackingState,
-                             ConnectRequest, ConnectReply, StreamHello, StreamConfig, IdrRequest, Haptics, ClientStats>;
+                             ConnectRequest, ConnectReply, StreamHello, StreamConfig, IdrRequest, Haptics, ClientStats,
+                             PairRequest, PairReply, SecureHello, SecureAccept>;
 
 MessageType typeOf(const Message& m);
 

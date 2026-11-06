@@ -1,5 +1,6 @@
 #include "kage/protocol/messages.hpp"
 
+#include <algorithm>
 #include <cmath>
 
 #include "kage/protocol/wire.hpp"
@@ -18,6 +19,14 @@ template <class... Ts>
 Overloaded(Ts...) -> Overloaded<Ts...>;
 
 bool finite(float v) { return std::isfinite(v); }
+
+template <size_t N>
+bool readKey(Reader& r, std::array<uint8_t, N>& k) {
+    std::span<const uint8_t> v;
+    if (!r.bytes(v, N)) return false;
+    std::copy(v.begin(), v.end(), k.begin());
+    return true;
+}
 
 bool readFloatIn(Reader& r, float& v, float lo, float hi) {
     if (!r.f32(v)) return false;
@@ -96,6 +105,10 @@ MessageType typeOf(const Message& m) {
                           [](const IdrRequest&) { return MessageType::IdrRequest; },
                           [](const Haptics&) { return MessageType::Haptics; },
                           [](const ClientStats&) { return MessageType::ClientStats; },
+                          [](const PairRequest&) { return MessageType::PairRequest; },
+                          [](const PairReply&) { return MessageType::PairReply; },
+                          [](const SecureHello&) { return MessageType::SecureHello; },
+                          [](const SecureAccept&) { return MessageType::SecureAccept; },
                       },
                       m);
 }
@@ -135,7 +148,26 @@ void encodeMessage(const Message& m, std::vector<uint8_t>& out) {
                        writePose(w, t.head);
                        for (const auto& c : t.controllers) writeController(w, c);
                    },
-                   [&](const ConnectRequest& c) { w.str(c.clientName.substr(0, kMaxNameLength)); },
+                   [&](const ConnectRequest& c) {
+                       w.str(c.clientName.substr(0, kMaxNameLength));
+                       w.bytes(c.clientKey);
+                   },
+                   [&](const PairRequest& c) {
+                       w.str(c.clientName.substr(0, kMaxNameLength));
+                       w.bytes(c.clientKey);
+                   },
+                   [&](const PairReply& c) {
+                       w.u8(static_cast<uint8_t>(c.status));
+                       w.bytes(c.hostKey);
+                   },
+                   [&](const SecureHello& c) {
+                       w.bytes(c.clientStatic);
+                       w.bytes(c.clientEphemeral);
+                   },
+                   [&](const SecureAccept& c) {
+                       w.bytes(c.hostEphemeral);
+                       w.bytes(c.confirm);
+                   },
                    [&](const ConnectReply& c) {
                        w.u8(static_cast<uint8_t>(c.status));
                        w.u16(c.streamPort);
@@ -252,14 +284,46 @@ std::optional<Message> decodeMessage(std::span<const uint8_t> payload) {
         case MessageType::ConnectRequest: {
             ConnectRequest c;
             r.str(c.clientName, kMaxNameLength);
+            readKey(r, c.clientKey);
             result = std::move(c);
+            break;
+        }
+        case MessageType::PairRequest: {
+            PairRequest c;
+            r.str(c.clientName, kMaxNameLength);
+            readKey(r, c.clientKey);
+            result = std::move(c);
+            break;
+        }
+        case MessageType::PairReply: {
+            PairReply c;
+            uint8_t st = 0;
+            r.u8(st);
+            if (st > static_cast<uint8_t>(PairStatus::Accepted)) r.fail();
+            c.status = static_cast<PairStatus>(st);
+            readKey(r, c.hostKey);
+            result = c;
+            break;
+        }
+        case MessageType::SecureHello: {
+            SecureHello c;
+            readKey(r, c.clientStatic);
+            readKey(r, c.clientEphemeral);
+            result = c;
+            break;
+        }
+        case MessageType::SecureAccept: {
+            SecureAccept c;
+            readKey(r, c.hostEphemeral);
+            readKey(r, c.confirm);
+            result = c;
             break;
         }
         case MessageType::ConnectReply: {
             ConnectReply c;
             uint8_t st = 0;
             r.u8(st);
-            if (st > static_cast<uint8_t>(ConnectStatus::Failed)) r.fail();
+            if (st > static_cast<uint8_t>(ConnectStatus::NotPaired)) r.fail();
             c.status = static_cast<ConnectStatus>(st);
             r.u16(c.streamPort);
             if (c.streamPort == 0) r.fail();
