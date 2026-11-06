@@ -99,21 +99,21 @@ bool solveCalibration(const std::vector<std::pair<Q, V3>>& A, const std::vector<
                       std::string& msg) {
     const size_t n = A.size();
     if (n < 60) {
-        msg = "Pas assez d'échantillons (les deux manettes doivent être suivies)";
+        msg = "Pas assez d'Ã©chantillons (les deux manettes doivent Ãªtre suivies)";
         return false;
     }
     double sDot = 0, sCross = 0;
     int used = 0;
-    for (size_t i = 0; i + 8 < n; ++i) {
-        const size_t j = i + 8;
+    for (size_t i = 0; i + 20 < n; ++i) {
+        const size_t j = i + 20;  // 1 s apart
         const V3 a = rotVec(qmul(A[j].first, conj(A[i].first)));
         const V3 b = rotVec(qmul(B[j].first, conj(B[i].first)));
-        if (len(a) < 0.25 || len(b) < 0.25) continue;  // need > ~15 deg of rotation
+        if (len(a) < 0.2 || len(b) < 0.2) continue;  // need > ~11 deg of rotation
         sDot += a.x * b.x + a.z * b.z;
         sCross += a.x * b.z - a.z * b.x;
         ++used;
     }
-    if (used < 15) {
+    if (used < 10) {
         msg = "Pas assez de rotation : tourne les manettes dans tous les sens";
         return false;
     }
@@ -157,9 +157,9 @@ bool solveCalibration(const std::vector<std::pair<Q, V3>>& A, const std::vector<
     err /= static_cast<double>(n);
     out.valid = true;
     char buf[160];
-    std::snprintf(buf, sizeof buf, "Calibration réussie (écart moyen %.1f cm, rotation %.0f°)", err * 100, yaw * 57.2958);
+    std::snprintf(buf, sizeof buf, "Calibration rÃ©ussie (Ã©cart moyen %.1f cm, rotation %.0fÂ°)", err * 100, yaw * 57.2958);
     msg = buf;
-    if (err > 0.05) msg += " - écart élevé, recommence en tenant les manettes bien serrées";
+    if (err > 0.05) msg += " - Ã©cart Ã©levÃ©, recommence en tenant les manettes bien serrÃ©es";
     return true;
 }
 
@@ -257,6 +257,7 @@ struct RiftTracking::Impl {
         const auto request = dir / L"calibrate.request";
         std::vector<std::pair<Q, V3>> sa, sb;
         double calibEnd = 0, lastSample = 0, last = ovr_GetTimeInSeconds(), lastCheck = 0;
+        int lastTracked = -1;
         while (running) {
             const double now = ovr_GetTimeInSeconds();
             const double dt = now - last;
@@ -295,7 +296,7 @@ struct RiftTracking::Impl {
                     sa.clear();
                     sb.clear();
                     calibEnd = now + 15;
-                    status("Calibration : tiens la manette droite du Rift collée à celle du Quest et fais-les tourner dans tous les sens (15 s)");
+                    status("Calibration : tiens la manette droite du Rift collÃ©e Ã  celle du Quest et fais-les tourner dans tous les sens (15 s)");
                 }
             }
             if (calibEnd > 0) {
@@ -319,6 +320,15 @@ struct RiftTracking::Impl {
                     status(msg);
                 }
             }
+            // Live tracked count (Rift asleep or controller off => 0/3), shown in the GUI.
+            int tracked = 0;
+            for (int i = 0; i < 3; ++i) tracked += src[i] && (flags[i] & ovrStatus_PositionTracked) ? 1 : 0;
+            if (calibEnd == 0 && tracked != lastTracked) {
+                lastTracked = tracked;
+                status(std::string("Rift connectÃ© : ") + std::to_string(tracked) + "/3 trackers suivis" +
+                       (c.valid ? ", calibrÃ©" : " - calibration nÃ©cessaire") +
+                       (tracked == 0 ? " (Rift en veille ? manettes Ã©teintes ?)" : ""));
+            }
             Sleep(4);  // ~250 Hz; SteamVR interpolates between updates
         }
     }
@@ -335,8 +345,8 @@ bool RiftTracking::start(const std::filesystem::path& dataDir) {
     if (const ovrResult r = ovr_Initialize(&p); OVR_FAILURE(r)) {
         ovrErrorInfo info{};
         ovr_GetLastErrorInfo(&info);
-        d.status(r == -3008 ? std::string("Rift : le pilote Oculus intégré à SteamVR utilise déjà le Rift. Fermer SteamVR, cliquer « 2. Préparer SteamVR », relancer.")
-                            : std::string("Rift : runtime Meta indisponible (Meta Horizon Link installé et lancé ?) [") + std::to_string(r) + " " + info.ErrorString + "]");
+        d.status(r == -3008 ? std::string("Rift : le pilote Oculus intÃ©grÃ© Ã  SteamVR utilise dÃ©jÃ  le Rift. Fermer SteamVR, cliquer Â« 2. PrÃ©parer SteamVR Â», relancer.")
+                            : std::string("Rift : runtime Meta indisponible (Meta Horizon Link installÃ© et lancÃ© ?) [") + std::to_string(r) + " " + info.ErrorString + "]");
         return false;
     }
     ovrGraphicsLuid luid;
@@ -345,7 +355,7 @@ bool RiftTracking::start(const std::filesystem::path& dataDir) {
         ovr_GetLastErrorInfo(&info);
         ovr_Shutdown();
         d.session = nullptr;
-        d.status(std::string("Rift : casque CV1 non détecté (branché, Meta Horizon Link lancé ?) [") + std::to_string(r) + " " + info.ErrorString + "]");
+        d.status(std::string("Rift : casque CV1 non dÃ©tectÃ© (branchÃ©, Meta Horizon Link lancÃ© ?) [") + std::to_string(r) + " " + info.ErrorString + "]");
         return false;
     }
     ovr_SetTrackingOriginType(d.session, ovrTrackingOrigin_FloorLevel);
@@ -353,7 +363,7 @@ bool RiftTracking::start(const std::filesystem::path& dataDir) {
     for (auto& t : d.trackers) vr::VRServerDriverHost()->TrackedDeviceAdded(t.serial(), vr::TrackedDeviceClass_GenericTracker, &t);
     d.running = true;
     d.thread = std::thread([&d] { d.loop(); });
-    d.status(d.calib.valid ? "Rift connecté, calibration chargée" : "Rift connecté : calibration nécessaire");
+    d.status(d.calib.valid ? "Rift connectÃ©, calibration chargÃ©e" : "Rift connectÃ© : calibration nÃ©cessaire");
     return true;
 }
 

@@ -17,6 +17,7 @@ namespace KageVR.Gui;
 public partial class MainWindow
 {
     private string FullBodyFlag => Path.Combine(_dataDir, "fullbody.enabled");
+    private string KeepAwakeFlag => Path.Combine(_dataDir, "keepawake.enabled");
     private readonly DispatcherTimer _keepAwake = new() { Interval = TimeSpan.FromMinutes(9) };
 
     private static string? OculusSupportDir()
@@ -29,6 +30,8 @@ public partial class MainWindow
     private void InitFullBody()
     {
         FullBodyCheck.IsChecked = File.Exists(FullBodyFlag);
+        // Remembered: keep the Rift awake from launch (else it sleeps and the trackers vanish).
+        if (File.Exists(KeepAwakeFlag)) { KeepAwakeCheck.IsChecked = true; OnKeepAwakeToggle(KeepAwakeCheck, new RoutedEventArgs()); }
         _keepAwake.Tick += (_, _) => Task.Run(ToggleProximityBypass);
         Closed += (_, _) => { if (KeepAwakeCheck.IsChecked == true) StopKeepAwake(); };
     }
@@ -112,6 +115,8 @@ public partial class MainWindow
     // so it is toggled every 9 min. Rendering on the Rift is cut to 1 % resolution.
     private async void OnKeepAwakeToggle(object s, RoutedEventArgs e)
     {
+        Directory.CreateDirectory(_dataDir);
+        if (KeepAwakeCheck.IsChecked == true) File.WriteAllText(KeepAwakeFlag, "1"); else File.Delete(KeepAwakeFlag);
         if (KeepAwakeCheck.IsChecked == true)
         {
             await RunOdtCli("service set-pixels-per-display-pixel-override 0.01\nserver: asw.Off");

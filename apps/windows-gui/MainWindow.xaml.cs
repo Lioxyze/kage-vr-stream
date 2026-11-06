@@ -122,6 +122,8 @@ public partial class MainWindow : Window
         var installed = DriverRegistered();
         if (!installed && MessageBox.Show("Enregistrer le pilote KAGÉ dans SteamVR (vrpathreg adddriver) ?\nRéversible avec « Retirer le pilote ».",
                                           "Pilote SteamVR", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
+        if (installed && MessageBox.Show("Retirer le pilote KAGÉ de SteamVR ?\nSans lui : plus d'image dans le casque ni de trackers Rift.",
+                                         "Pilote SteamVR", MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK) return;
         if (!installed) RemoveStaleDriverPaths();
         Log((await RunHost(installed ? "remove-driver" : "install-driver")).Trim());
         Refresh();
