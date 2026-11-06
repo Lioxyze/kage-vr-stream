@@ -16,3 +16,4 @@ apps/quest-client/local.properties
 .idea/
 apps/windows-gui/bin/
 apps/windows-gui/obj/
+/dist/

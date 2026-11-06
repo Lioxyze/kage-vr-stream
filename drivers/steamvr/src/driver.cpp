@@ -15,6 +15,9 @@
 
 #include "amf_encoder.hpp"
 #include "audio_capture.hpp"
+#ifdef KAGE_WITH_RIFT
+#include "rift_tracking.hpp"
+#endif
 #include "d3d_compositor.hpp"
 #include "kage/util/log.hpp"
 #include "kage/util/time.hpp"
@@ -540,6 +543,9 @@ public:
         dataDir_ = dir;
         server_.onTracking = [this](const kp::TrackingState& t) {
             if (auto* h = hmd_.load()) h->update(t);
+#ifdef KAGE_WITH_RIFT
+            rift_.setReference(t.controllers[1]);
+#endif
             for (auto& p : ctrlPtr_)
                 if (auto* c = p.load()) c->update(t.controllers[static_cast<int>(c->hand())]);
         };
@@ -553,10 +559,17 @@ public:
         audio_.enabled = [this] { return server_.clientActive(); };
         audio_.onChunk = [this](uint32_t rate, std::span<const int16_t> pcm) { server_.sendAudio(rate, pcm); };
         audio_.start();
+#ifdef KAGE_WITH_RIFT
+        std::error_code fbEc;
+        fullBody_ = std::filesystem::exists(dir / L"fullbody.enabled", fbEc);  // started from RunFrame (retries)
+#endif
         return vr::VRInitError_None;
     }
     void Cleanup() override {
         audio_.stop();
+#ifdef KAGE_WITH_RIFT
+        rift_.stop();
+#endif
         server_.stop();
         VR_CLEANUP_SERVER_DRIVER_CONTEXT();
     }
@@ -569,6 +582,13 @@ public:
         if (const uint64_t now = GetTickCount64(); now - lastOffsetLoad_ > 2000) {  // live tuning
             lastOffsetLoad_ = now;
             reloadControllerOffset(dataDir_ / L"controller_offset.txt");
+#ifdef KAGE_WITH_RIFT
+            // Retry every few seconds: Meta Horizon Link may start after SteamVR.
+            if (fullBody_ && !rift_.started() && now - lastRiftTry_ > 5000) {
+                lastRiftTry_ = now;
+                rift_.start(dataDir_);
+            }
+#endif
         }
         // Devices are added once the headset said hello: its display geometry defines the HMD.
         if (!hmdObj_) {
@@ -604,6 +624,11 @@ public:
 private:
     kage::driver::StreamServer server_;
     kage::driver::AudioCapture audio_;
+#ifdef KAGE_WITH_RIFT
+    kage::driver::RiftTracking rift_;
+    bool fullBody_ = false;
+    uint64_t lastRiftTry_ = 0;
+#endif
     std::filesystem::path dataDir_;
     uint64_t lastOffsetLoad_ = 0;
     std::unique_ptr<Hmd> hmdObj_;

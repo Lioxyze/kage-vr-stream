@@ -23,3 +23,15 @@ set_target_properties(driver_kage PROPERTIES
 add_custom_command(TARGET driver_kage POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/driver.vrdrivermanifest ${KAGE_DRIVER_DIR}/driver.vrdrivermanifest
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/resources ${KAGE_DRIVER_DIR}/resources)
+
+# Optional Rift CV1 full body support: needs the LibOVR headers + shim (Oculus SDK,
+# not redistributed here). scripts/fetch-libovr.ps1 downloads them into tools/.
+set(KAGE_LIBOVR_DIR "${CMAKE_SOURCE_DIR}/tools/otsl/CustomHMD/LibOVR" CACHE PATH "LibOVR (Include + Shim)")
+if(EXISTS "${KAGE_LIBOVR_DIR}/Shim/OVR_CAPIShim.c")
+    target_sources(driver_kage PRIVATE src/rift_tracking.cpp "${KAGE_LIBOVR_DIR}/Shim/OVR_CAPIShim.c")
+    target_include_directories(driver_kage PRIVATE "${KAGE_LIBOVR_DIR}/Include")
+    target_compile_definitions(driver_kage PRIVATE KAGE_WITH_RIFT=1)
+    message(STATUS "KAGE: Rift CV1 full body support enabled (${KAGE_LIBOVR_DIR})")
+else()
+    message(STATUS "KAGE: LibOVR not found, Rift CV1 full body disabled (run scripts/fetch-libovr.ps1)")
+endif()

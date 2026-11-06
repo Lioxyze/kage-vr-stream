@@ -49,6 +49,7 @@ public partial class MainWindow : Window
         _timer.Tick += (_, _) => Refresh();
         _timer.Start();
         Closed += (_, _) => StopService();
+        InitFullBody();
         if (_hostExe == null) Log("kage-host.exe introuvable : compiler le projet (scripts\\build-host.ps1).");
         else StartService();  // the headset can find this PC as soon as the app is open
         Refresh();
@@ -121,6 +122,7 @@ public partial class MainWindow : Window
         var installed = DriverRegistered();
         if (!installed && MessageBox.Show("Enregistrer le pilote KAGÉ dans SteamVR (vrpathreg adddriver) ?\nRéversible avec « Retirer le pilote ».",
                                           "Pilote SteamVR", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
+        if (!installed) RemoveStaleDriverPaths();
         Log((await RunHost(installed ? "remove-driver" : "install-driver")).Trim());
         Refresh();
     }
@@ -165,6 +167,23 @@ public partial class MainWindow : Window
                             MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
         File.Delete(PairedFile);
         Log("Casques appairés oubliés.");
+    }
+
+    // A KAGE driver registered from another folder (e.g. an older copy) would be loaded
+    // twice by SteamVR: drop those entries from openvrpaths.vrpath before installing.
+    private static void RemoveStaleDriverPaths()
+    {
+        var f = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "openvr", "openvrpaths.vrpath");
+        try
+        {
+            if (!File.Exists(f)) return;
+            var root = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(f))!.AsObject();
+            if (root["external_drivers"] is not System.Text.Json.Nodes.JsonArray arr) return;
+            for (int i = arr.Count - 1; i >= 0; i--)
+                if (arr[i]?.GetValue<string>() is { } p && p.TrimEnd('\\', '/').EndsWith(@"driver\kage", StringComparison.OrdinalIgnoreCase)) arr.RemoveAt(i);
+            File.WriteAllText(f, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+        }
+        catch (Exception) { /* vrpathreg will still add ours */ }
     }
 
     // ---- state ----------------------------------------------------------------------
@@ -217,6 +236,7 @@ public partial class MainWindow : Window
             _values["pipeline"].Text = "Non disponible";
         _values["cpu"].Text = CpuLoad() is double cpu ? $"{cpu:0} %" : "Non disponible";
         _values["gpu"].Text = "Non disponible";
+        RefreshFullBody();
     }
 
     [DllImport("kernel32.dll")]

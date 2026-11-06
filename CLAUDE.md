@@ -35,6 +35,8 @@ Win11 Pro, Ryzen 5 5600X, RX 6700 XT (AMF 1.4.37, HEVC+H.264 matériel, **pas d'
 ## Test réel
 Appairer une première fois via la GUI (dev-e2e lance kage-host sans GUI, donc sans confirmation de code). `.\scripts\dev-e2e.ps1 [-NoInstall]` (connexion auto + proximité désactivée) ; `KAGE_DUMP_FRAME=1` pour une image composée en BMP. GUI : `dotnet build apps\windows-gui\KageVR.Gui.csproj -c Release -o build\gui`. Pilote déjà enregistré via vrpathreg (`kage-host remove-driver` pour retirer). Pièges déjà rencontrés : ne jamais appeler AMediaCodec depuis ses callbacks ; vider l'ImageReader en permanence ; lier le cbuffer au VS ; verrou ID3D10Multithread autour de la composition (contexte partagé avec AMF).
 
+Full body CV1 : drivers/steamvr/src/rift_tracking.cpp (LibOVR via tools/otsl, scripts/fetch-libovr.ps1), GUI apps/windows-gui/FullBody.cs. Fichiers %LOCALAPPDATA%/KageVR : fullbody.enabled, calibrate.request, rift_calibration.txt, fullbody_status.txt. Le pilote Oculus de SteamVR doit être désactivé (sinon erreur -3008). Pack : scripts/package.ps1 -> dist/KageVR.
+
 ## Ports UDP
 47800 découverte · 47801 contrôle (kage-host) · 47802 streaming (pilote SteamVR).
 

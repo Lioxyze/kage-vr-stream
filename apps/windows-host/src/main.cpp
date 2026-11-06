@@ -138,8 +138,9 @@ int cmdDriver(bool add) {
     }
     wchar_t self[MAX_PATH];
     GetModuleFileNameW(nullptr, self, MAX_PATH);
-    // kage-host.exe is in build/apps/windows-host/<Config>/ ; the driver in build/driver/kage
-    std::filesystem::path dir = std::filesystem::path(self).parent_path() / L"../../../driver/kage";
+    // Packaged layout: driver/kage next to kage-host.exe; dev layout: build/driver/kage.
+    std::filesystem::path dir = std::filesystem::path(self).parent_path() / L"driver/kage";
+    if (!std::filesystem::exists(dir / L"driver.vrdrivermanifest")) dir = std::filesystem::path(self).parent_path() / L"../../../driver/kage";
     dir = std::filesystem::weakly_canonical(dir);
     if (add && !std::filesystem::exists(dir / L"driver.vrdrivermanifest")) {
         print("Pilote non compilé (build\\driver\\kage introuvable).\n");
