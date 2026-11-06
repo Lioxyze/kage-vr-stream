@@ -247,6 +247,41 @@ struct RiftTracking::Impl {
     std::atomic<double> predictS{0.04};  // Quest prediction horizon (s)
     Calibration calib;
     bool refValid = false;
+    double refTime = 0;
+
+    // Fallback reference when no KAGE stream feeds us (another streamer such as Virtual
+    // Desktop owns the headset): the right-hand controller as SteamVR sees it (raw space,
+    // the same space our trackers are reported in).
+    static bool steamVrRightController(Q& q, V3& p) {
+        vr::TrackedDevicePose_t poses[vr::k_unMaxTrackedDeviceCount];
+        vr::VRServerDriverHost()->GetRawTrackedDevicePoses(0, poses, vr::k_unMaxTrackedDeviceCount);
+        auto* props = vr::VRProperties();
+        for (uint32_t i = 1; i < vr::k_unMaxTrackedDeviceCount; ++i) {
+            if (!poses[i].bPoseIsValid || !poses[i].bDeviceIsConnected) continue;
+            const auto c = props->TrackedDeviceToPropertyContainer(i);
+            vr::ETrackedPropertyError e;
+            if (props->GetInt32Property(c, vr::Prop_DeviceClass_Int32, &e) != vr::TrackedDeviceClass_Controller) continue;
+            if (props->GetInt32Property(c, vr::Prop_ControllerRoleHint_Int32, &e) != vr::TrackedControllerRole_RightHand) continue;
+            const auto& m = poses[i].mDeviceToAbsoluteTracking.m;
+            p = {m[0][3], m[1][3], m[2][3]};
+            const double tr = m[0][0] + m[1][1] + m[2][2];
+            if (tr > 0) {
+                const double s = std::sqrt(tr + 1.0) * 2;
+                q = {0.25 * s, (m[2][1] - m[1][2]) / s, (m[0][2] - m[2][0]) / s, (m[1][0] - m[0][1]) / s};
+            } else if (m[0][0] > m[1][1] && m[0][0] > m[2][2]) {
+                const double s = std::sqrt(1.0 + m[0][0] - m[1][1] - m[2][2]) * 2;
+                q = {(m[2][1] - m[1][2]) / s, 0.25 * s, (m[0][1] + m[1][0]) / s, (m[0][2] + m[2][0]) / s};
+            } else if (m[1][1] > m[2][2]) {
+                const double s = std::sqrt(1.0 + m[1][1] - m[0][0] - m[2][2]) * 2;
+                q = {(m[0][2] - m[2][0]) / s, (m[0][1] + m[1][0]) / s, 0.25 * s, (m[1][2] + m[2][1]) / s};
+            } else {
+                const double s = std::sqrt(1.0 + m[2][2] - m[0][0] - m[1][1]) * 2;
+                q = {(m[1][0] - m[0][1]) / s, (m[0][2] + m[2][0]) / s, (m[1][2] + m[2][1]) / s, 0.25 * s};
+            }
+            return true;
+        }
+        return false;
+    }
     Q refQ;
     V3 refP;
 
@@ -323,8 +358,12 @@ struct RiftTracking::Impl {
                 if (now >= calibStart && now - lastSample > 0.05) {
                     lastSample = now;
                     std::lock_guard l(m);
-                    if (refValid && (ts.HandStatusFlags[1] & ovrStatus_PositionTracked)) {
-                        sa.push_back({refQ, refP});
+                    Q rq = refQ;
+                    V3 rp = refP;
+                    bool ok = refValid && now - refTime < 0.2;
+                    if (!ok) ok = steamVrRightController(rq, rp);  // e.g. Virtual Desktop session
+                    if (ok && (ts.HandStatusFlags[1] & ovrStatus_PositionTracked)) {
+                        sa.push_back({rq, rp});
                         sb.push_back({toQ(ts.HandPoses[1].ThePose.Orientation), toV(ts.HandPoses[1].ThePose.Position)});
                     }
                 }
@@ -405,6 +444,7 @@ void RiftTracking::setReference(const protocol::ControllerState& c, double predi
     auto& d = *impl_;
     std::lock_guard l(d.m);
     d.refValid = (c.flags & protocol::kPoseValid) != 0;
+    d.refTime = ovr_GetTimeInSeconds();
     d.refP = {c.pose.position[0], c.pose.position[1], c.pose.position[2]};
     d.refQ = {c.pose.orientation[3], c.pose.orientation[0], c.pose.orientation[1], c.pose.orientation[2]};
 }
