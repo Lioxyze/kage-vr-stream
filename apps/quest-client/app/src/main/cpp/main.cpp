@@ -53,6 +53,7 @@ private:
         kage::telemetry::RollingStats rtt(64);
         int failures = 0;
         auto lastReport = std::chrono::steady_clock::now();
+        auto lastBurst = lastReport;
 
         while (!stop_) {
             if (!host) {
@@ -78,9 +79,27 @@ private:
             }
             const auto now = std::chrono::steady_clock::now();
             if (now - lastReport > std::chrono::seconds(5) && !rtt.empty()) {
-                klog::info("link: rtt median {:.2f} ms p99 {:.2f} ms, offset {} us, pongs {}/{}", rtt.percentile(50) / 1000,
-                           rtt.percentile(99) / 1000, link.clock().offsetUs(), link.pongsReceived(), link.pingsSent());
+                klog::info("link idle (1 ping/500 ms): rtt median {:.2f} ms p99 {:.2f} ms, pongs {}/{}",
+                           rtt.percentile(50) / 1000, rtt.percentile(99) / 1000, link.pongsReceived(), link.pingsSent());
                 lastReport = now;
+            }
+            // Diagnostic burst: with continuous traffic the Wi-Fi radio stays awake, as it
+            // will during streaming. Comparing both shows the cost of Wi-Fi power saving.
+            if (now - lastBurst > std::chrono::seconds(10)) {
+                kage::telemetry::RollingStats burst(100);
+                int ok = 0;
+                for (int i = 0; i < 100 && !stop_; ++i) {
+                    if (auto s = link.ping(host->control, 100)) {
+                        burst.add(static_cast<double>(s->rttUs));
+                        ++ok;
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                }
+                if (!burst.empty())
+                    klog::info("link burst (100 pings/5 ms): {}/100 ok, rtt min {:.2f} median {:.2f} p99 {:.2f} max {:.2f} ms",
+                               ok, burst.min() / 1000, burst.percentile(50) / 1000, burst.percentile(99) / 1000,
+                               burst.max() / 1000);
+                lastBurst = std::chrono::steady_clock::now();
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
         }

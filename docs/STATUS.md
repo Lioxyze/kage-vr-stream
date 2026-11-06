@@ -35,11 +35,30 @@ Dernière mise à jour : 2026-11-06, phase 1.
 | Fonction | État |
 |---|---|
 | Projet Gradle/NDK, manifeste Quest | ✅ compilé : `app-debug.apk` 6,2 Mo, arm64-v8a uniquement, minSdk 29 / targetSdk 32, 3 permissions (INTERNET, OPENXR, OPENXR_SYSTEM), sans avertissement de compilation |
-| Session OpenXR GLES, swapchains stéréo, couche de projection | 🟡 compilé, **non testé sur le casque** |
-| Journalisation de la résolution recommandée par œil et des fréquences supportées | 🟡 |
-| Découverte du PC + ping / estimation d'horloge en arrière-plan | 🟡 |
+| Session OpenXR GLES, swapchains stéréo, couche de projection | ✅ sur Quest 3S : la session atteint FOCUSED, les images sont soumises |
+| Journalisation de la résolution recommandée par œil et des fréquences supportées | ✅ (valeurs ci-dessous) |
+| Découverte du PC + ping / estimation d'horloge en arrière-plan | ✅ en Wi-Fi réel (mesures ci-dessous) |
 | Affichage d'un texte ou d'un menu VR | ❌ (pour l'instant, une couleur unie indique l'état) |
 | Décodage, tracking envoyé au PC, contrôleurs, audio | ❌ |
+
+## Premier test sur casque (2026-11-06)
+
+Matériel : **Meta Quest 3S** (`panther`, Android 14 / API 34, build UP1A.231005.007.A1) et non Quest 3. PC en Wi-Fi (192.168.1.10), casque en Wi-Fi 5 GHz, canal 64 (192.168.1.100), même routeur (Freebox).
+
+Valeurs rapportées par le runtime (logcat `KageVR`) :
+- Runtime OpenXR « Oculus », système « Meta Quest 3S », 75 extensions d'instance
+- GPU Adreno 740, OpenGL ES 3.2
+- Résolution recommandée : **1680×1760 par œil** (maximum de swapchain 8192×8192)
+- Fréquences : **72 / 80 / 90 / 120 Hz** (72 Hz par défaut à l'ouverture de la session)
+
+Liaison UDP KAGÉ, mesurée par le client (RTT = aller-retour PC↔casque, hors traitement) :
+
+| Mode | RTT médian | p99 | Min | Pertes |
+|---|---|---|---|---|
+| Maintien, 1 ping / 500 ms | 21–35 ms | 40–52 ms | — | 8/368 sans réponse (~2 %) |
+| Rafale, 1 ping / 5 ms (3 × 100) | 7,7–8,0 ms | 16,7–41,3 ms | 5,1 ms | 0/300 |
+
+Interprétation : à faible trafic, la mise en veille Wi-Fi ajoute environ 15 à 25 ms ; le trafic continu (streaming) la supprime. Le plancher d'environ 5 ms et la queue p99 sont cohérents avec deux sauts Wi-Fi (PC et casque sur le même point d'accès) : relier le PC en Ethernet est la première amélioration attendue, **à confirmer par une mesure**.
 
 ## Tests réellement exécutés (phase 1)
 
