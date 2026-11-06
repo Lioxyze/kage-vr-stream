@@ -12,6 +12,7 @@ Dernière mise à jour : 2026-11-06. Matériel de test : RX 6700 XT + **Meta Que
 | Pilote SteamVR : casque reconnu, direct mode, vsync 90 Hz | ✅ | vrserver « Using existing HMD kage.KAGE-HMD » |
 | Manettes vues par SteamVR comme Touch (modèles Quest Plus) avec leurs poses | ✅ | capture : manettes et rayon dans SteamVR |
 | Image SteamVR (dashboard, environnement) affichée dans le casque | ✅ | capture du casque |
+| Mode 60 images/s (écran 120 Hz, reprojection du casque) + verrou Wi-Fi basse latence | ✅ | 2026-11-06 : 60 i/s stables, 54–150 Mbit/s, encodage 6,9 ms (BALANCED), décodage 6–8 ms ; pertes seulement au démarrage de SteamVR et lors de 2 pics Wi-Fi (RTT > 200 ms). Qualité perçue et position des manettes : à confirmer casque porté |
 | Débit adaptatif AIMD | ✅ | 75–100 Mbit/s sur un Wi-Fi calme ; avec chiffrement, Wi-Fi plus chargé (transit 11–18 ms) : 55–99 Mbit/s, 17 images perdues en 88 s. Ignore les baisses de cadence de SteamVR ; le délai seul ne descend pas sous 50 Mbit/s |
 | Boutons des manettes vers les jeux | 🟡 | envoyés et câblés au profil Touch, pas encore testés en jeu |
 | Vibrations | 🟡 | chemin complet écrit, non testé |

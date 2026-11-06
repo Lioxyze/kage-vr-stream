@@ -7,6 +7,9 @@
 
     <!-- LAN discovery + streaming over UDP. No other permission is requested. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- WifiLock (low-latency mode: disables Wi-Fi power save while streaming) -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="org.khronos.openxr.permission.OPENXR" />
     <uses-permission android:name="org.khronos.openxr.permission.OPENXR_SYSTEM" />
     <!-- Hands shown in the lobby (optional: controllers keep working without it). -->

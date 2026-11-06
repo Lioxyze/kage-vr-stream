@@ -34,6 +34,31 @@ using kage::monotonicMicros;
 
 namespace {
 
+// WifiManager.WIFI_MODE_FULL_LOW_LATENCY (API 29): turns Wi-Fi power save off while
+// the app is in front. Without it the radio sleeps between beacons and adds
+// tens of ms of jitter. Returns a global ref to the lock (kept for the app life).
+jobject acquireLowLatencyWifi(JNIEnv* env, jobject activity) {
+    auto clear = [&] {
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            return true;
+        }
+        return false;
+    };
+    jclass ctx = env->GetObjectClass(activity);
+    jmethodID getSys = env->GetMethodID(ctx, "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;");
+    jobject wm = env->CallObjectMethod(activity, getSys, env->NewStringUTF("wifi"));
+    if (clear() || !wm) return nullptr;
+    jmethodID create = env->GetMethodID(env->GetObjectClass(wm), "createWifiLock",
+                                        "(ILjava/lang/String;)Landroid/net/wifi/WifiManager$WifiLock;");
+    jobject lock = env->CallObjectMethod(wm, create, 4 /* WIFI_MODE_FULL_LOW_LATENCY */, env->NewStringUTF("kage-stream"));
+    if (clear() || !lock) return nullptr;
+    env->CallVoidMethod(lock, env->GetMethodID(env->GetObjectClass(lock), "acquire", "()V"));
+    if (clear()) return nullptr;
+    klog::info("Wi-Fi low-latency lock acquired");
+    return env->NewGlobalRef(lock);
+}
+
 std::string deviceName() {
     char model[PROP_VALUE_MAX] = {};
     return __system_property_get("ro.product.model", model) > 0 ? std::string(model) : std::string("Quest");
@@ -706,7 +731,9 @@ private:
 void android_main(android_app* app) {
     JNIEnv* env = nullptr;
     app->activity->vm->AttachCurrentThread(&env, nullptr);
-    klog::info("KAGE VR Stream client 0.2.0 starting");
+    klog::info("KAGE VR Stream client 0.3.0 starting");
+    jobject wifiLock = acquireLowLatencyWifi(env, app->activity->clazz);
+    if (!wifiLock) klog::warn("Wi-Fi low-latency lock unavailable");
 
     XrApp xr;
     const bool xrReady = xr.init(app);
@@ -738,5 +765,10 @@ void android_main(android_app* app) {
     }
     if (xrReady) ui.stop();
     xr.shutdown();
+    if (wifiLock) {
+        env->CallVoidMethod(wifiLock, env->GetMethodID(env->GetObjectClass(wifiLock), "release", "()V"));
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        env->DeleteGlobalRef(wifiLock);
+    }
     app->activity->vm->DetachCurrentThread();
 }
