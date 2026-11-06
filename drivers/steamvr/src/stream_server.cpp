@@ -62,7 +62,7 @@ StreamConfig StreamServer::makeConfig(const StreamHello& h) const {
     c.width = (h.eyeWidth * 2 + 15) & ~15u;
     c.height = (h.eyeHeight + 15) & ~15u;
     c.refreshHz = h.refreshHz;
-    c.bitrateKbps = std::min<uint32_t>(h.maxBitrateKbps, 100'000);
+    c.bitrateKbps = std::min<uint32_t>(h.maxBitrateKbps, 150'000);
     return c;
 }
 
@@ -173,8 +173,18 @@ void StreamServer::sendVideo(uint32_t frameIndex, bool keyframe, const VideoFram
     frameBuf_.clear();
     encodeFrameMeta(meta, frameBuf_);
     frameBuf_.insert(frameBuf_.end(), bitstream.begin(), bitstream.end());
+    // Pacing: a whole frame sent back-to-back overflows Wi-Fi queues (losses, latency
+    // spikes). Spread it at 4x the video bitrate (>= 250 Mbit/s): a few ms per frame.
+    const double bps = std::max(250e6, 4.0 * pacingKbps_.load() * 1000.0);
+    const uint64_t t0 = monotonicMicros();
+    size_t sent = 0;
     fragmentFrame(frameIndex, meta.trackingTimeUs, keyframe ? kFrameKeyframe : 0, frameBuf_,
-                  [&](std::span<const uint8_t> p) { send(Channel::Video, p); });
+                  [&](std::span<const uint8_t> p) {
+                      const uint64_t due = t0 + static_cast<uint64_t>(sent * 8 * 1e6 / bps);
+                      while (monotonicMicros() < due) std::this_thread::yield();
+                      send(Channel::Video, p);
+                      sent += p.size() + PacketHeader::kSize + crypto::SecureSession::kOverhead;
+                  });
 }
 
 void StreamServer::sendHaptics(const Haptics& hp) {

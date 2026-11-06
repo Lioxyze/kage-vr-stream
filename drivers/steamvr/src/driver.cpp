@@ -64,6 +64,43 @@ vr::DriverPose_t makePose(const kp::Pose& p, bool valid, bool connected) {
     return d;
 }
 
+// The headset sends the OpenXR *grip* pose; SteamVR's Touch profile (and games'
+// hand models) expect the native Oculus controller frame, which is tilted and
+// shifted relative to grip. Default offset (left hand; x mirrored for the right):
+// same values as ALVR's Touch emulation. Tunable live without rebuilding through
+// %LOCALAPPDATA%\KageVR\controller_offset.txt: "x y z pitchDeg" (meters, grip frame).
+struct ControllerOffset {
+    float x = -0.0065f, y = 0.002f, z = -0.051f, pitchDeg = 40.f;
+};
+std::mutex g_offsetMutex;
+ControllerOffset g_offset;
+
+void reloadControllerOffset(const std::filesystem::path& file) {
+    ControllerOffset o;
+    if (FILE* f = _wfopen(file.c_str(), L"r")) {
+        ControllerOffset r;
+        if (std::fscanf(f, "%f %f %f %f", &r.x, &r.y, &r.z, &r.pitchDeg) == 4 && std::fabs(r.x) < 0.3f &&
+            std::fabs(r.y) < 0.3f && std::fabs(r.z) < 0.3f && std::fabs(r.pitchDeg) <= 180.f)
+            o = r;
+        std::fclose(f);
+    }
+    std::lock_guard l(g_offsetMutex);
+    g_offset = o;
+}
+
+void applyControllerOffset(vr::DriverPose_t& d, kp::Hand hand) {
+    ControllerOffset o;
+    {
+        std::lock_guard l(g_offsetMutex);
+        o = g_offset;
+    }
+    const float h = o.pitchDeg * 3.14159265f / 360.f;
+    d.qDriverFromHeadRotation = {std::cos(h), std::sin(h), 0, 0};  // w x y z: rotation about local X
+    d.vecDriverFromHeadTranslation[0] = hand == kp::Hand::Left ? o.x : -o.x;
+    d.vecDriverFromHeadTranslation[1] = o.y;
+    d.vecDriverFromHeadTranslation[2] = o.z;
+}
+
 // ---------------------------------------------------------------------------
 class Controller : public vr::ITrackedDeviceServerDriver {
 public:
@@ -135,6 +172,7 @@ public:
         {
             std::lock_guard l(m_);
             pose_ = makePose(c.pose, connected && (c.flags & kp::kPoseValid), connected);
+            applyControllerOffset(pose_, hand_);
         }
         vr::VRServerDriverHost()->TrackedDevicePoseUpdated(id_, pose_, sizeof(vr::DriverPose_t));
         auto* in = vr::VRDriverInput();
@@ -359,7 +397,10 @@ public:
         if (n <= 3) klog::info("Present #{}: composed={}", n, tex != nullptr);
         if (!tex) return;
         ++composed_;
-        if (const uint32_t br = pendingBitrate_.exchange(0)) encoder_.setBitrate(br);  // applied on the encode thread
+        if (const uint32_t br = pendingBitrate_.exchange(0)) {  // applied on the encode thread
+            encoder_.setBitrate(br);
+            net_.setPacingKbps(br);
+        }
         const uint64_t index = frameIndex_++;
         {
             std::lock_guard l(metaMutex_);
@@ -393,7 +434,7 @@ private:
     std::atomic<uint32_t> encodeUsAvg_{0};
 
     static constexpr size_t kMetaRing = 16;
-    static constexpr uint32_t kMinKbps = 10'000, kStartKbps = 40'000;
+    static constexpr uint32_t kMinKbps = 10'000, kStartKbps = 60'000;
     // Delay alone (no lost frame) never pushes below this: on a jittery Wi-Fi the delay
     // stays high even at low rates, and cutting further only degrades the image.
     static constexpr uint32_t kDelayFloorKbps = 50'000;
@@ -493,6 +534,7 @@ public:
             klog::setFile((dir / L"driver.log").string());
         }
         klog::info("KAGE driver loaded");
+        dataDir_ = dir;
         server_.onTracking = [this](const kp::TrackingState& t) {
             if (auto* h = hmd_.load()) h->update(t);
             for (auto& p : ctrlPtr_)
@@ -521,6 +563,10 @@ public:
     void LeaveStandby() override {}
 
     void RunFrame() override {
+        if (const uint64_t now = GetTickCount64(); now - lastOffsetLoad_ > 2000) {  // live tuning
+            lastOffsetLoad_ = now;
+            reloadControllerOffset(dataDir_ / L"controller_offset.txt");
+        }
         // Devices are added once the headset said hello: its display geometry defines the HMD.
         if (!hmdObj_) {
             auto hello = server_.hello();
@@ -555,6 +601,8 @@ public:
 private:
     kage::driver::StreamServer server_;
     kage::driver::AudioCapture audio_;
+    std::filesystem::path dataDir_;
+    uint64_t lastOffsetLoad_ = 0;
     std::unique_ptr<Hmd> hmdObj_;
     std::atomic<Hmd*> hmd_{nullptr};
     std::unique_ptr<Controller> ctrl_[2];

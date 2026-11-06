@@ -187,7 +187,16 @@ struct Button {
     std::string label;
     int id;
     bool enabled = true;
+    bool selected = false;
 };
+
+// Stream rate (what SteamVR renders and we encode) and the display rate used for it.
+// Below the display rate, the headset's compositor reprojects the missing refreshes.
+struct FpsMode {
+    int fps;
+    float displayHz;
+};
+constexpr FpsMode kModes[] = {{45, 90.f}, {60, 120.f}, {72, 72.f}, {90, 90.f}};
 
 class Panel {
 public:
@@ -256,8 +265,9 @@ public:
             identity_ = *id;
         }
         lan_.start(identity_, dataDir_ / "hosts.txt");
-        const auto& rates = xr_.refreshRates();
-        if (std::find(rates.begin(), rates.end(), 90.f) != rates.end()) xr_.setRefreshRate(90.f);  // smooth default
+        // Default 60 images/s on a 120 Hz display: twice the bits per image (sharper)
+        // and the headset reprojects every other refresh, so head motion stays fluid.
+        if (!setMode(60)) setMode(72);
     }
     void stop() {
         stream_.stop();
@@ -296,6 +306,20 @@ private:
         if (mode_ == Mode::Streaming) updateStreaming(c);
         buildButtons();
         updatePointers();
+    }
+
+    bool modeAvailable(const FpsMode& m) const {
+        const auto& r = xr_.refreshRates();
+        return std::find(r.begin(), r.end(), m.displayHz) != r.end();
+    }
+    bool setMode(int fps) {
+        for (const auto& m : kModes)
+            if (m.fps == fps && modeAvailable(m)) {
+                streamFps_ = fps;
+                xr_.setRefreshRate(m.displayHz);
+                return true;
+            }
+        return false;
     }
 
     void updateMenuToggle() {
@@ -345,7 +369,7 @@ private:
             kp::StreamHello hello;
             hello.eyeWidth = xr_.eyeWidth();
             hello.eyeHeight = xr_.eyeHeight();
-            hello.refreshHz = xr_.refreshRate();
+            hello.refreshHz = static_cast<float>(streamFps_);  // SteamVR renders at this rate
             std::array<XrFovf, 2> fov{};
             float ipd = 0.063f;
             if (xr_.eyeFovAndIpd(fov, ipd))
@@ -467,14 +491,15 @@ private:
             for (size_t i = 0; i < hosts_.size() && i < 3 && !pairCode_; ++i)
                 buttons_.push_back({0, top - 0.20f - i * 0.085f, 0.78f, 0.07f, "", kBtnHost0 + static_cast<int>(i),
                                     mode_ == Mode::Lobby});
-            const auto& rates = xr_.refreshRates();
-            const float bw = 0.12f;
+            const float bw = 0.14f;
             if (mode_ == Mode::Connecting)
                 buttons_.push_back({0.30f, -top + 0.10f, 0.22f, 0.06f, "Annuler", kBtnDisconnect});
-            for (size_t i = 0; i < rates.size() && i < 5 && mode_ == Mode::Lobby; ++i)
+            for (size_t i = 0; i < std::size(kModes) && mode_ == Mode::Lobby; ++i) {
+                if (!modeAvailable(kModes[i])) continue;
                 buttons_.push_back({-0.30f + i * (bw + 0.02f), -top + 0.10f, bw, 0.06f,
-                                    std::format("{} Hz", static_cast<int>(rates[i] + 0.5f)), kBtnRate0 + static_cast<int>(i),
-                                    mode_ == Mode::Lobby});
+                                    std::format("{} i/s", kModes[i].fps), kBtnRate0 + static_cast<int>(i), true});
+                buttons_.back().selected = kModes[i].fps == streamFps_;
+            }
         } else if (overlay_) {
             buttons_.push_back({-0.26f, -top + 0.09f, 0.3f, 0.07f, "Reprendre", kBtnResume});
             buttons_.push_back({0.05f, -top + 0.09f, 0.22f, 0.07f, "Recentrer", kBtnRecenter});
@@ -488,7 +513,7 @@ private:
             if (i < hosts_.size()) connectTo(hosts_[i]);
         } else if (id >= kBtnRate0 && id < kBtnRate0 + 10) {
             const size_t i = static_cast<size_t>(id - kBtnRate0);
-            if (i < xr_.refreshRates().size()) xr_.setRefreshRate(xr_.refreshRates()[i]);
+            if (i < std::size(kModes)) setMode(kModes[i].fps);
         } else if (id == kBtnDisconnect) {
             lan_.cancel();
             pairCode_.reset();
@@ -601,7 +626,8 @@ private:
 
         for (const auto& b : buttons_) {
             const bool hov = b.id == hovered_;
-            const Color bg = !b.enabled ? Color{0.10f, 0.10f, 0.12f, 0.9f}
+            const Color bg = b.selected  ? Color{0.45f, 0.25f, 0.85f, 1}
+                             : !b.enabled ? Color{0.10f, 0.10f, 0.12f, 0.9f}
                              : hov      ? Color{0.30f, 0.16f, 0.62f, 1}
                                         : Color{0.14f, 0.12f, 0.22f, 1};
             renderer_.quad(xm::mul(m, xm::fromPoseScale({{0, 0, 0, 1}, {b.x, b.y, 0}}, b.w, b.h, 1)), bg);
@@ -643,7 +669,7 @@ private:
             renderer_.text(m, left + 0.02f, y, 0.025f, std::format("{}  ({})", h.name, h.control.toString()), palette::kText);
             renderer_.text(m, W / 2 - 0.20f, y, 0.022f, h.rttMs >= 0 ? std::format("{:.1f} ms", h.rttMs) : "", palette::kCyan);
         }
-        renderer_.text(m, left, -top + 0.17f, 0.02f, "Fréquence d'affichage", palette::kDim);
+        renderer_.text(m, left, -top + 0.17f, 0.02f, "Images par seconde (moins = image plus nette)", palette::kDim);
         if (!status_.empty()) renderer_.text(m, left, -top + 0.035f, 0.02f, status_, palette::kWarn);
     }
 
@@ -666,6 +692,7 @@ private:
     std::filesystem::path dataDir_;
     kage::crypto::KeyPair identity_;
     std::optional<uint32_t> pairCode_;
+    int streamFps_ = 60;
     uint64_t connectStartUs_ = 0, lostSinceUs_ = 0, menuDownAt_ = 0;
     bool menuWasDown_ = false, autoTried_ = false;
     FrameContext ctx_;

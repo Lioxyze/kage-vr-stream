@@ -63,7 +63,9 @@ bool AmfEncoder::init(ID3D11Device* device, bool hevc, uint32_t width, uint32_t 
     const amf_int64 vbv = static_cast<amf_int64>(bps / fps);
     if (hevc) {
         AMF_TRY(encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_USAGE, AMF_VIDEO_ENCODER_HEVC_USAGE_ULTRA_LOW_LATENCY));
-        setOpt(encoder_, AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET, AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET_SPEED);
+        // At <= 72 fps the frame budget allows the better BALANCED preset (sharper image).
+        setOpt(encoder_, AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET,
+               fps <= 72.5f ? AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET_BALANCED : AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET_SPEED);
         AMF_TRY(encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_FRAMESIZE, AMFConstructSize(width, height)));
         setOpt(encoder_, AMF_VIDEO_ENCODER_HEVC_FRAMERATE, rate);
         setOpt(encoder_, AMF_VIDEO_ENCODER_HEVC_LOWLATENCY_MODE, true);
@@ -80,7 +82,8 @@ bool AmfEncoder::init(ID3D11Device* device, bool hevc, uint32_t width, uint32_t 
         setOpt(encoder_, AMF_VIDEO_ENCODER_HEVC_QUERY_TIMEOUT, static_cast<amf_int64>(10));
     } else {
         AMF_TRY(encoder_->SetProperty(AMF_VIDEO_ENCODER_USAGE, AMF_VIDEO_ENCODER_USAGE_ULTRA_LOW_LATENCY));
-        setOpt(encoder_, AMF_VIDEO_ENCODER_QUALITY_PRESET, AMF_VIDEO_ENCODER_QUALITY_PRESET_SPEED);
+        setOpt(encoder_, AMF_VIDEO_ENCODER_QUALITY_PRESET,
+               fps <= 72.5f ? AMF_VIDEO_ENCODER_QUALITY_PRESET_BALANCED : AMF_VIDEO_ENCODER_QUALITY_PRESET_SPEED);
         AMF_TRY(encoder_->SetProperty(AMF_VIDEO_ENCODER_FRAMESIZE, AMFConstructSize(width, height)));
         setOpt(encoder_, AMF_VIDEO_ENCODER_FRAMERATE, rate);
         setOpt(encoder_, AMF_VIDEO_ENCODER_LOWLATENCY_MODE, true);
