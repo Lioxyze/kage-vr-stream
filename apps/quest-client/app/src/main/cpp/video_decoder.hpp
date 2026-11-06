@@ -10,6 +10,8 @@
 #include <media/NdkMediaCodec.h>
 
 #include <atomic>
+#include <condition_variable>
+#include <thread>
 #include <cstdint>
 #include <deque>
 #include <map>
@@ -41,12 +43,16 @@ private:
     static void onOutput(AMediaCodec*, void* self, int32_t index, AMediaCodecBufferInfo* info);
     static void onFormat(AMediaCodec*, void*, AMediaFormat*) {}
     static void onError(AMediaCodec*, void*, media_status_t err, int32_t, const char* detail);
-    void pump();
+    void feedLoop();
 
     AMediaCodec* codec_ = nullptr;
     AImageReader* reader_ = nullptr;
     std::mutex mutex_;
+    std::condition_variable cv_;
+    std::thread feeder_;
+    bool stop_ = false;
     std::deque<int32_t> freeInputs_;
+    std::deque<int32_t> outputs_;  // decoded buffers to render (released by the feeder, never in a callback)
     struct Pending {
         uint32_t index;
         std::vector<uint8_t> data;
@@ -60,5 +66,6 @@ private:
     std::map<AHardwareBuffer*, EGLImageKHR> images_;
     uint32_t frameIndex_ = 0;
     bool hasFrame_ = false;
+    int acquireErrors_ = 0;
     std::atomic<uint64_t> decodeUsSum_{0}, decodeCount_{0};
 };

@@ -53,6 +53,8 @@ bool VideoDecoder::init(bool hevc, int width, int height) {
     AMediaFormat_setInt32(f, "vendor.qti-ext-dec-picture-order.enable", 1);
     AMediaCodecOnAsyncNotifyCallback cb{onInput, onOutput, onFormat, onError};
     AMediaCodec_setAsyncNotifyCallback(codec_, cb, this);
+    stop_ = false;
+    feeder_ = std::thread(&VideoDecoder::feedLoop, this);
     const media_status_t st = AMediaCodec_configure(codec_, f, window, nullptr, 0);
     AMediaFormat_delete(f);
     if (st != AMEDIA_OK || AMediaCodec_start(codec_) != AMEDIA_OK) {
@@ -74,6 +76,12 @@ bool VideoDecoder::init(bool hevc, int width, int height) {
 }
 
 void VideoDecoder::shutdown() {
+    {
+        std::lock_guard l(mutex_);
+        stop_ = true;
+    }
+    cv_.notify_all();
+    if (feeder_.joinable()) feeder_.join();
     if (codec_) {
         AMediaCodec_stop(codec_);
         AMediaCodec_delete(codec_);
@@ -95,17 +103,22 @@ void VideoDecoder::shutdown() {
     hasFrame_ = false;
     std::lock_guard l(mutex_);
     freeInputs_.clear();
+    outputs_.clear();
     pending_.clear();
 }
 
+// Codec callbacks only record work; all AMediaCodec calls happen on the feeder
+// thread (calling the codec from its own callback thread deadlocks).
 void VideoDecoder::onInput(AMediaCodec*, void* self, int32_t index) {
     auto* d = static_cast<VideoDecoder*>(self);
-    std::lock_guard l(d->mutex_);
-    d->freeInputs_.push_back(index);
-    d->pump();
+    {
+        std::lock_guard l(d->mutex_);
+        d->freeInputs_.push_back(index);
+    }
+    d->cv_.notify_one();
 }
 
-void VideoDecoder::onOutput(AMediaCodec* codec, void* self, int32_t index, AMediaCodecBufferInfo* info) {
+void VideoDecoder::onOutput(AMediaCodec*, void* self, int32_t index, AMediaCodecBufferInfo* info) {
     auto* d = static_cast<VideoDecoder*>(self);
     const uint32_t frame = static_cast<uint32_t>(info->presentationTimeUs);
     const uint64_t q = d->queuedAt_[frame % 64];
@@ -113,19 +126,39 @@ void VideoDecoder::onOutput(AMediaCodec* codec, void* self, int32_t index, AMedi
         d->decodeUsSum_ += kage::monotonicMicros() - q;
         ++d->decodeCount_;
     }
-    AMediaCodec_releaseOutputBuffer(codec, static_cast<size_t>(index), true);  // render into the ImageReader
+    {
+        std::lock_guard l(d->mutex_);
+        d->outputs_.push_back(index);
+    }
+    d->cv_.notify_one();
 }
 
 void VideoDecoder::onError(AMediaCodec*, void*, media_status_t err, int32_t, const char* detail) {
     klog::error("decoder error {}: {}", static_cast<int>(err), detail ? detail : "");
 }
 
-void VideoDecoder::pump() {  // mutex held
-    while (!freeInputs_.empty() && !pending_.empty()) {
-        const int32_t idx = freeInputs_.front();
-        auto p = std::move(pending_.front());
-        pending_.pop_front();
-        freeInputs_.pop_front();
+void VideoDecoder::feedLoop() {
+    for (;;) {
+        int32_t idx = -1, out = -1;
+        Pending p;
+        {
+            std::unique_lock l(mutex_);
+            cv_.wait(l, [&] { return stop_ || !outputs_.empty() || (!freeInputs_.empty() && !pending_.empty()); });
+            if (stop_) return;
+            if (!outputs_.empty()) {
+                out = outputs_.front();
+                outputs_.pop_front();
+            } else {
+                idx = freeInputs_.front();
+                p = std::move(pending_.front());
+                pending_.pop_front();
+                freeInputs_.pop_front();
+            }
+        }
+        if (out >= 0) {
+            AMediaCodec_releaseOutputBuffer(codec_, static_cast<size_t>(out), true);  // render into the ImageReader
+            continue;
+        }
         size_t cap = 0;
         uint8_t* buf = AMediaCodec_getInputBuffer(codec_, static_cast<size_t>(idx), &cap);
         if (!buf || cap < p.data.size()) {
@@ -140,16 +173,23 @@ void VideoDecoder::pump() {  // mutex held
 
 void VideoDecoder::submit(uint32_t frameIndex, const uint8_t* data, size_t size, uint64_t nowUs) {
     if (!codec_) return;
-    std::lock_guard l(mutex_);
-    queuedAt_[frameIndex % 64] = nowUs;
-    pending_.push_back({frameIndex, std::vector<uint8_t>(data, data + size)});
-    pump();
+    {
+        std::lock_guard l(mutex_);
+        queuedAt_[frameIndex % 64] = nowUs;
+        pending_.push_back({frameIndex, std::vector<uint8_t>(data, data + size)});
+    }
+    cv_.notify_one();
 }
 
 bool VideoDecoder::latest(EGLDisplay display) {
     if (!reader_) return false;
     AImage* img = nullptr;
-    if (AImageReader_acquireLatestImage(reader_, &img) != AMEDIA_OK || !img) return false;
+    const media_status_t st = AImageReader_acquireLatestImage(reader_, &img);
+    if (st != AMEDIA_OK || !img) {
+        if (st != AMEDIA_IMGREADER_NO_BUFFER_AVAILABLE && ++acquireErrors_ <= 5) klog::warn("acquireLatestImage: {}", static_cast<int>(st));
+        return false;
+    }
+    if (!hasFrame_) klog::info("first decoded image latched");
     AHardwareBuffer* hb = nullptr;
     AImage_getHardwareBuffer(img, &hb);
     if (!hb) {

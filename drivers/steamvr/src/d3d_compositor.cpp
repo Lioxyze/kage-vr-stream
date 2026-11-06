@@ -82,8 +82,7 @@ bool D3DCompositor::init() {
                                  D3D11_SDK_VERSION, &device_, nullptr, &ctx_)))
         return false;
     // Encoder and compositor share this device from several threads.
-    ComPtr<ID3D10Multithread> mt;
-    if (SUCCEEDED(ctx_.As(&mt))) mt->SetMultithreadProtected(TRUE);
+    if (SUCCEEDED(ctx_.As(&mt_))) mt_->SetMultithreadProtected(TRUE);
     char name[128];
     WideCharToMultiByte(CP_UTF8, 0, d.Description, -1, name, sizeof name, nullptr, nullptr);
     log::info("D3D11 device on {} ({} MiB)", name, d.DedicatedVideoMemory >> 20);
@@ -105,10 +104,24 @@ bool D3DCompositor::createShaders() {
     sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
     sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
     sd.MaxLOD = D3D11_FLOAT32_MAX;
-    device_->CreateSamplerState(&sd, &sampler_);
+    sd.MaxAnisotropy = 1;
+    sd.ComparisonFunc = D3D11_COMPARISON_NEVER;  // must be a valid enum even when unused
+    if (FAILED(device_->CreateSamplerState(&sd, &sampler_))) {
+        log::error("CreateSamplerState failed");
+        return false;
+    }
+    D3D11_RASTERIZER_DESC rd{};
+    rd.FillMode = D3D11_FILL_SOLID;
+    rd.CullMode = D3D11_CULL_NONE;
+    rd.DepthClipEnable = TRUE;
+    device_->CreateRasterizerState(&rd, &raster_);
     D3D11_BLEND_DESC b{};
-    b.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
-    device_->CreateBlendState(&b, &blendOpaque_);
+    auto& rt = b.RenderTarget[0];
+    rt.SrcBlend = rt.SrcBlendAlpha = D3D11_BLEND_ONE;
+    rt.DestBlend = rt.DestBlendAlpha = D3D11_BLEND_ZERO;
+    rt.BlendOp = rt.BlendOpAlpha = D3D11_BLEND_OP_ADD;
+    rt.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+    if (FAILED(device_->CreateBlendState(&b, &blendOpaque_))) log::error("CreateBlendState failed");
     b.RenderTarget[0].BlendEnable = TRUE;
     b.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
     b.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
@@ -144,7 +157,8 @@ bool D3DCompositor::createSet(uint32_t pid, uint32_t w, uint32_t h, uint32_t for
         sv.Format = srvOf(fmt);
         sv.ViewDimension = td.SampleDesc.Count > 1 ? D3D11_SRV_DIMENSION_TEXTURE2DMS : D3D11_SRV_DIMENSION_TEXTURE2D;
         sv.Texture2D.MipLevels = 1;
-        device_->CreateShaderResourceView(s.tex[i].Get(), &sv, &s.srv[i]);
+        if (FAILED(device_->CreateShaderResourceView(s.tex[i].Get(), &sv, &s.srv[i])))
+            log::error("CreateShaderResourceView failed (format {})", static_cast<int>(sv.Format));
         ComPtr<IDXGIResource> res;
         HANDLE sh = nullptr;
         s.tex[i].As(&res);
@@ -203,27 +217,48 @@ void D3DCompositor::setOutputSize(uint32_t w, uint32_t h) {
     td.Usage = D3D11_USAGE_DEFAULT;
     td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
     for (int i = 0; i < kRing; ++i) {
-        device_->CreateTexture2D(&td, nullptr, &out_[i]);
-        device_->CreateRenderTargetView(out_[i].Get(), nullptr, &rtv_[i]);
+        const HRESULT a = device_->CreateTexture2D(&td, nullptr, &out_[i]);
+        const HRESULT b = device_->CreateRenderTargetView(out_[i].Get(), nullptr, &rtv_[i]);
+        if (FAILED(a) || FAILED(b))
+            log::error("output texture {}: tex 0x{:x} rtv 0x{:x}", i, static_cast<uint32_t>(a), static_cast<uint32_t>(b));
     }
 }
 
 ID3D11Texture2D* D3DCompositor::compose(const std::vector<std::array<LayerEye, 2>>& layers, uint64_t syncTexture) {
     if (!outW_ || layers.empty()) return nullptr;
     // SteamVR signals that rendering into the layer textures is finished through the keyed mutex of the sync texture.
-    ComPtr<ID3D11Texture2D> sync;
-    ComPtr<IDXGIKeyedMutex> km;
-    if (syncTexture && SUCCEEDED(device_->OpenSharedResource(reinterpret_cast<HANDLE>(syncTexture), IID_PPV_ARGS(&sync)))) {
-        sync.As(&km);
-        if (km && km->AcquireSync(0, 10) != S_OK) return nullptr;
+    if (syncTexture && syncTexture != syncHandle_) {  // opened once, reused every frame
+        syncKm_.Reset();
+        ComPtr<ID3D11Texture2D> sync;
+        if (SUCCEEDED(device_->OpenSharedResource(reinterpret_cast<HANDLE>(syncTexture), IID_PPV_ARGS(&sync)))) sync.As(&syncKm_);
+        syncHandle_ = syncTexture;
+        log::info("sync texture opened (keyed mutex: {})", syncKm_ != nullptr);
+    }
+    IDXGIKeyedMutex* km = syncKm_.Get();
+    if (km) {
+        const HRESULT hr = km->AcquireSync(0, 10);
+        if (hr != S_OK) {
+            if (++syncFailures_ <= 5) log::warn("sync AcquireSync failed: 0x{:x}", static_cast<uint32_t>(hr));
+            return nullptr;
+        }
     }
     std::lock_guard l(mutex_);
+    // AMF shares the immediate context from its own thread: hold the device lock for the
+    // whole state-setup + draw sequence so no call from AMF can interleave.
+    if (mt_) mt_->Enter();
     const int slot = ringPos_;
     ringPos_ = (ringPos_ + 1) % kRing;
+    ctx_->ClearState();
     ctx_->OMSetRenderTargets(1, rtv_[slot].GetAddressOf(), nullptr);
+    if (dumpPath_ && composed_ == 299) {
+        const float magenta[4] = {1, 0, 1, 1};
+        ctx_->ClearRenderTargetView(rtv_[slot].Get(), magenta);
+    }
+    ctx_->RSSetState(raster_.Get());
     ctx_->VSSetShader(vs_.Get(), nullptr, 0);
     ctx_->PSSetShader(ps_.Get(), nullptr, 0);
     ctx_->PSSetSamplers(0, 1, sampler_.GetAddressOf());
+    ctx_->VSSetConstantBuffers(0, 1, cb_.GetAddressOf());  // uvRect is used by the vertex shader
     ctx_->PSSetConstantBuffers(0, 1, cb_.GetAddressOf());
     ctx_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     ctx_->IASetInputLayout(nullptr);
@@ -232,7 +267,31 @@ ID3D11Texture2D* D3DCompositor::compose(const std::vector<std::array<LayerEye, 2
         for (int eye = 0; eye < 2; ++eye) {
             int idx = 0;
             const Set* s = findByHandle(layers[li][eye].texture, idx);
+            if (composed_ < 2)
+                log::info("compose layer {} eye {}: handle 0x{:x} found={} bounds {:.2f},{:.2f}-{:.2f},{:.2f}", li, eye,
+                          layers[li][eye].texture, s != nullptr, layers[li][eye].uMin, layers[li][eye].vMin,
+                          layers[li][eye].uMax, layers[li][eye].vMax);
             if (!s) continue;
+            if (composed_ == 299 && dumpPath_ && li == 0 && eye == 0) {  // debug: mean level of what SteamVR rendered
+                D3D11_TEXTURE2D_DESC d;
+                s->tex[idx]->GetDesc(&d);
+                d.Usage = D3D11_USAGE_STAGING;
+                d.BindFlags = 0;
+                d.MiscFlags = 0;
+                d.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+                ComPtr<ID3D11Texture2D> st;
+                D3D11_MAPPED_SUBRESOURCE mp;
+                if (SUCCEEDED(device_->CreateTexture2D(&d, nullptr, &st))) {
+                    ctx_->CopyResource(st.Get(), s->tex[idx].Get());
+                    if (SUCCEEDED(ctx_->Map(st.Get(), 0, D3D11_MAP_READ, 0, &mp))) {
+                        uint64_t sum = 0;
+                        for (uint32_t y = 0; y < d.Height; y += 4)
+                            for (uint32_t x = 0; x < d.Width * 4; x += 16) sum += static_cast<const uint8_t*>(mp.pData)[y * mp.RowPitch + x];
+                        ctx_->Unmap(st.Get(), 0);
+                        log::info("source layer mean (sampled) {:.2f}, slot {}", sum / ((d.Height / 4.0) * (d.Width / 4.0)), idx);
+                    }
+                }
+            }
             const auto& e = layers[li][eye];
             const float params[8] = {e.uMin, e.vMin, e.uMax, e.vMax, s->linear ? 1.f : 0.f, 0, 0, 0};
             ctx_->UpdateSubresource(cb_.Get(), 0, nullptr, params, 0, 0);
@@ -242,11 +301,57 @@ ID3D11Texture2D* D3DCompositor::compose(const std::vector<std::array<LayerEye, 2
             ctx_->Draw(3, 0);
         }
     }
-    ID3D11ShaderResourceView* nullSrv = nullptr;
-    ctx_->PSSetShaderResources(0, 1, &nullSrv);
+    ctx_->ClearState();
     ctx_->Flush();
+    if (mt_) mt_->Leave();
     if (km) km->ReleaseSync(0);
+    if (++composed_ == 300 && dumpPath_) dump(out_[slot].Get());
     return out_[slot].Get();
+}
+
+// Debug: writes one composed frame as a 24-bit BMP (enabled by KAGE_DUMP_FRAME).
+void D3DCompositor::dump(ID3D11Texture2D* tex) {
+    D3D11_TEXTURE2D_DESC d;
+    tex->GetDesc(&d);
+    d.Usage = D3D11_USAGE_STAGING;
+    d.BindFlags = 0;
+    d.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    ComPtr<ID3D11Texture2D> st;
+    if (FAILED(device_->CreateTexture2D(&d, nullptr, &st))) return;
+    ctx_->CopyResource(st.Get(), tex);
+    D3D11_MAPPED_SUBRESOURCE m;
+    if (FAILED(ctx_->Map(st.Get(), 0, D3D11_MAP_READ, 0, &m))) return;
+    const uint32_t w = d.Width, h = d.Height, row = (w * 3 + 3) & ~3u;
+    std::vector<uint8_t> px(static_cast<size_t>(row) * h);
+    uint64_t sum = 0;
+    for (uint32_t y = 0; y < h; ++y) {
+        const auto* src = static_cast<const uint8_t*>(m.pData) + static_cast<size_t>(m.RowPitch) * (h - 1 - y);
+        for (uint32_t x = 0; x < w; ++x) {
+            px[y * row + x * 3 + 0] = src[x * 4 + 0];
+            px[y * row + x * 3 + 1] = src[x * 4 + 1];
+            px[y * row + x * 3 + 2] = src[x * 4 + 2];
+            sum += src[x * 4 + 0] + src[x * 4 + 1] + src[x * 4 + 2];
+        }
+    }
+    ctx_->Unmap(st.Get(), 0);
+    const uint32_t fileSize = 54 + static_cast<uint32_t>(px.size());
+    uint8_t hdr[54] = {'B', 'M'};
+    auto put32 = [&](int o, uint32_t v) { std::memcpy(hdr + o, &v, 4); };
+    put32(2, fileSize);
+    put32(10, 54);
+    put32(14, 40);
+    put32(18, w);
+    put32(22, h);
+    hdr[26] = 1;
+    hdr[28] = 24;
+    put32(34, static_cast<uint32_t>(px.size()));
+    if (FILE* f = _wfopen(dumpPath_->c_str(), L"wb")) {
+        fwrite(hdr, 1, 54, f);
+        fwrite(px.data(), 1, px.size(), f);
+        fclose(f);
+    }
+    log::info("frame dumped ({}x{}, mean level {:.1f}/255), device removed reason 0x{:x}", w, h,
+              static_cast<double>(sum) / (3.0 * w * h), static_cast<uint32_t>(device_->GetDeviceRemovedReason()));
 }
 
 }  // namespace kage::driver

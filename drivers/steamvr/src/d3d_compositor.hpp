@@ -4,12 +4,15 @@
 #pragma once
 
 #include <d3d11.h>
+#include <dxgi.h>
 #include <wrl/client.h>
 
 #include <array>
 #include <cstdint>
 #include <map>
 #include <mutex>
+#include <optional>
+#include <string>
 #include <vector>
 
 namespace kage::driver {
@@ -60,10 +63,21 @@ private:
     ComPtr<ID3D11Buffer> cb_;
     ComPtr<ID3D11SamplerState> sampler_;
     ComPtr<ID3D11BlendState> blendOpaque_, blendAlpha_;
+    ComPtr<ID3D11RasterizerState> raster_;
+    ComPtr<ID3D10Multithread> mt_;
     std::array<ComPtr<ID3D11Texture2D>, kRing> out_;
     std::array<ComPtr<ID3D11RenderTargetView>, kRing> rtv_;
     uint32_t outW_ = 0, outH_ = 0;
     int ringPos_ = 0;
+    uint64_t syncHandle_ = 0;
+    ComPtr<IDXGIKeyedMutex> syncKm_;
+    uint32_t syncFailures_ = 0;
+    uint64_t composed_ = 0;
+    std::optional<std::wstring> dumpPath_;
+    void dump(ID3D11Texture2D* tex);
+
+public:
+    void enableDump(const std::wstring& path) { dumpPath_ = path; }
     std::mutex mutex_;
     std::vector<Set> sets_;
 };

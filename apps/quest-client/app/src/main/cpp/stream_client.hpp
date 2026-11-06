@@ -60,4 +60,5 @@ private:
     uint32_t seq_[6] = {};
     std::vector<uint8_t> payload_, packet_;
     kage::sync::ClockSync clock_;
+    bool loggedFirst_ = false;
 };

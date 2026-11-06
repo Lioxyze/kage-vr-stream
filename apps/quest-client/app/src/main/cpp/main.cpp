@@ -277,7 +277,8 @@ private:
             stream_.start({target_.control.ipv4, reply->streamPort}, hello);
         }
         if (stream_.running()) {
-            if (auto cfg = stream_.config(); cfg && !decoder_.ready()) {
+            const auto cfg = stream_.config();
+            if (cfg && !decoder_.ready()) {
                 if (decoder_.init(cfg->codec == kp::kCodecHEVC, static_cast<int>(cfg->width), static_cast<int>(cfg->height))) {
                     stream_.attachDecoder(&decoder_);
                     uScale_ = static_cast<float>(xr_.eyeWidth() * 2) / static_cast<float>(cfg->width);
@@ -288,6 +289,9 @@ private:
                     return;
                 }
             }
+            if (cfg) sendTracking(ctx_);  // SteamVR needs a valid pose to render at full rate
+            // Drain decoded images now: an ImageReader that is never read stalls the codec.
+            if (decoder_.ready()) decoder_.latest(xr_.eglDisplay());
             if (stream_.videoFlowing() && decoder_.hasFrame()) {
                 mode_ = Mode::Streaming;
                 overlay_ = false;

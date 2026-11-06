@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <format>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -176,8 +177,14 @@ public:
 
     bool initGraphics() {
         if (!gpu_.init()) return false;
+        wchar_t dumpEnv[8];
+        if (GetEnvironmentVariableW(L"KAGE_DUMP_FRAME", dumpEnv, 8)) {
+            wchar_t local[MAX_PATH];
+            if (GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH)) gpu_.enableDump(std::wstring(local) + L"\\KageVR\\frame.bmp");
+        }
         gpu_.setOutputSize(cfg_.width, cfg_.height);
-        if (!encoder_.init(gpu_.device(), cfg_.codec == kp::kCodecHEVC, cfg_.width, cfg_.height, cfg_.refreshHz, cfg_.bitrateKbps))
+        bitrateKbps_ = std::min(kStartKbps, cfg_.bitrateKbps);
+        if (!encoder_.init(gpu_.device(), cfg_.codec == kp::kCodecHEVC, cfg_.width, cfg_.height, cfg_.refreshHz, bitrateKbps_))
             return false;
         return true;
     }
@@ -230,6 +237,7 @@ public:
 
     void update(const kp::TrackingState& t) {
         if (id_ == vr::k_unTrackedDeviceIndexInvalid) return;
+        ++trackingCount_;
         {
             std::lock_guard l(poseMutex_);
             pose_ = makePose(t.head, t.headFlags & kp::kPoseValid, true);
@@ -238,6 +246,34 @@ public:
         vr::VRServerDriverHost()->TrackedDevicePoseUpdated(id_, pose_, sizeof(vr::DriverPose_t));
     }
     void requestIdr() { idr_ = true; }
+
+    // Deterministic AIMD bitrate control from the headset's 1 Hz report.
+    // Congestion = lost frames, fewer frames than the refresh rate, or one-way transit
+    // rising 8 ms above the best seen. Back off 25 %, then probe up 5 % per calm second.
+    void onStats(const kp::ClientStats& s) {
+        const uint32_t net = s.networkUsAvg;
+        if (net && (net < bestNetUs_ || bestNetUs_ == 0)) bestNetUs_ = net;
+        bestNetUs_ += 50;  // slowly forget an old optimum (route/channel changes)
+        const bool congested = s.framesDropped > 0 || s.framesReceived + 5 < static_cast<uint32_t>(cfg_.refreshHz) ||
+                               (net && net > bestNetUs_ + 8000);
+        uint32_t br = bitrateKbps_;
+        if (++reports_ <= 5) {
+            // SteamVR start-up (shader compiles, dashboard loading) causes transient stalls: ignore.
+        } else if (congested) {
+            br = std::max<uint32_t>(kMinKbps, br * 3 / 4);
+            calm_ = -2;  // hold 2 s before probing again
+        } else if (++calm_ >= 1) {
+            br = std::min<uint32_t>(cfg_.bitrateKbps, br + br / 10);
+        }
+        if (br != bitrateKbps_) {
+            bitrateKbps_ = br;
+            pendingBitrate_ = br;
+        }
+        writeStats(s, br);
+        klog::info("client: {} fps, {} lost, decode {:.1f} ms, transit {:.1f} ms (best {:.1f}), rtt {:.1f} ms -> {} Mbit/s{}",
+                   s.framesReceived, s.framesDropped, s.decodeUsAvg / 1000.0, net / 1000.0, bestNetUs_ / 1000.0,
+                   s.rttUs / 1000.0, br / 1000, congested ? " (congestion)" : "");
+    }
 
     // IVRDisplayComponent -----------------------------------------------------
     void GetWindowBounds(int32_t* x, int32_t* y, uint32_t* w, uint32_t* h) override {
@@ -298,6 +334,8 @@ public:
         layers_.push_back(l);
     }
     void Present(vr::SharedTextureHandle_t sync) override {
+        const uint64_t n = ++presents_;
+        if (n <= 3) klog::info("Present #{}: {} layer(s), sync 0x{:x}", n, layers_.size(), sync);
         if (layers_.empty()) return;
         kp::VideoFrameMeta meta;
         {
@@ -308,24 +346,53 @@ public:
         meta.renderPose.orientation = quatFromMatrix(renderPose_);
         ID3D11Texture2D* tex = net_.clientActive() ? gpu_.compose(layers_, sync) : nullptr;
         layers_.clear();
+        if (n <= 3) klog::info("Present #{}: composed={}", n, tex != nullptr);
         if (!tex) return;
+        ++composed_;
+        if (const uint32_t br = pendingBitrate_.exchange(0)) encoder_.setBitrate(br);  // applied on the encode thread
         const uint64_t index = frameIndex_++;
         {
             std::lock_guard l(metaMutex_);
             metas_[index % kMetaRing] = meta;
         }
-        encoder_.submit(tex, index, idr_.exchange(false) || index == 0);
+        const bool ok = encoder_.submit(tex, index, idr_.exchange(false) || index == 0);
+        if (n <= 3) klog::info("Present #{}: submitted={}", n, ok);
+        if (ok) ++submitted_;
     }
     void PostPresent(const Throttling_t*) override {}
 
 private:
+    // Live metrics for the Windows GUI (%LOCALAPPDATA%\KageVR\stats.json, rewritten each second).
+    void writeStats(const kp::ClientStats& s, uint32_t br) {
+        wchar_t local[MAX_PATH];
+        if (!GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH)) return;
+        const std::wstring dir = std::wstring(local) + L"\\KageVR\\";
+        const std::string json = std::format(
+            "{{\"timeMs\":{},\"fps\":{},\"lost\":{},\"decodeMs\":{:.2f},\"transitMs\":{:.2f},\"rttMs\":{:.2f},"
+            "\"encodeMs\":{:.2f},\"bitrateMbps\":{:.1f},\"codec\":\"{}\",\"width\":{},\"height\":{},\"refreshHz\":{:.0f},"
+            "\"predictionMs\":null}}",
+            GetTickCount64(), s.framesReceived, s.framesDropped, s.decodeUsAvg / 1000.0, s.networkUsAvg / 1000.0,
+            s.rttUs / 1000.0, encodeUsAvg_.load() / 1000.0, br / 1000.0, cfg_.codec == kp::kCodecHEVC ? "HEVC" : "H.264",
+            cfg_.width, cfg_.height, cfg_.refreshHz);
+        if (FILE* f = _wfopen((dir + L"stats.tmp").c_str(), L"wb")) {
+            fwrite(json.data(), 1, json.size(), f);
+            fclose(f);
+            MoveFileExW((dir + L"stats.tmp").c_str(), (dir + L"stats.json").c_str(), MOVEFILE_REPLACE_EXISTING);
+        }
+    }
+    std::atomic<uint32_t> encodeUsAvg_{0};
+
     static constexpr size_t kMetaRing = 16;
+    static constexpr uint32_t kMinKbps = 10'000, kStartKbps = 40'000;
+    uint32_t bitrateKbps_ = kStartKbps, bestNetUs_ = 0;
+    int calm_ = 0, reports_ = 0;
+    std::atomic<uint32_t> pendingBitrate_{0};
 
     void vsyncLoop() {
         // High-resolution waitable timer: ~0.5 ms accuracy instead of the 15.6 ms default tick.
         HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
         const double period = 1.0 / cfg_.refreshHz;
-        uint64_t next = kage::monotonicMicros();
+        uint64_t next = kage::monotonicMicros(), lastWatch = next;
         while (running_) {
             next += static_cast<uint64_t>(period * 1e6);
             const int64_t wait = static_cast<int64_t>(next) - static_cast<int64_t>(kage::monotonicMicros());
@@ -338,6 +405,12 @@ private:
                 next = kage::monotonicMicros();  // fell far behind (debugger, sleep): resync
             }
             vr::VRServerDriverHost()->VsyncEvent(0);
+            if (kage::monotonicMicros() - lastWatch > 2'000'000) {
+                lastWatch = kage::monotonicMicros();
+                klog::info("watch: presents {} composed {} submitted {} encoded {} tracking {} clientActive {}",
+                           presents_.load(), composed_.load(), submitted_.load(), encoded_.load(), trackingCount_.load(),
+                           net_.clientActive());
+            }
         }
         if (timer) CloseHandle(timer);
     }
@@ -355,11 +428,13 @@ private:
                 meta = metas_[f->frameIndex % kMetaRing];
             }
             net_.sendVideo(static_cast<uint32_t>(f->frameIndex), f->keyframe, meta, f->data);
+            ++encoded_;
             ++frames;
             bytes += f->data.size();
             encUsSum += now - f->submitUs;
             if (now - lastLog > 5'000'000) {
                 const double secs = (now - lastLog) / 1e6;
+                if (frames) encodeUsAvg_ = static_cast<uint32_t>(encUsSum / frames);
                 klog::info("video: {:.1f} fps, {:.1f} Mbit/s, encode {:.2f} ms avg", frames / secs, bytes * 8 / secs / 1e6,
                            frames ? encUsSum / 1000.0 / frames : 0.0);
                 frames = bytes = encUsSum = 0;
@@ -381,6 +456,7 @@ private:
     vr::HmdMatrix34_t renderPose_{};
     std::atomic<bool> idr_{true};
     uint64_t frameIndex_ = 0;
+    std::atomic<uint64_t> presents_{0}, composed_{0}, submitted_{0}, encoded_{0}, trackingCount_{0};
     std::mutex metaMutex_;
     std::array<kp::VideoFrameMeta, kMetaRing> metas_{};
     std::atomic<bool> running_{false};
@@ -410,9 +486,8 @@ public:
         server_.onIdrRequest = [this] {
             if (auto* h = hmd_.load()) h->requestIdr();
         };
-        server_.onStats = [](const kp::ClientStats& s) {
-            klog::info("client: {} frames, {} dropped, decode {:.2f} ms, network {:.2f} ms, rtt {:.2f} ms", s.framesReceived,
-                       s.framesDropped, s.decodeUsAvg / 1000.0, s.networkUsAvg / 1000.0, s.rttUs / 1000.0);
+        server_.onStats = [this](const kp::ClientStats& s) {
+            if (auto* h = hmd_.load()) h->onStats(s);
         };
         if (!server_.start(kp::kDefaultStreamPort)) return vr::VRInitError_Driver_Failed;
         return vr::VRInitError_None;

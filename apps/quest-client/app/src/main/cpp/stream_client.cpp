@@ -107,6 +107,8 @@ void StreamClient::loop() {
             cs.networkUsAvg = netCount ? static_cast<uint32_t>(netUsSum / netCount) : 0;
             cs.rttUs = clock_.hasEstimate() ? static_cast<uint32_t>(clock_.lastRttUs()) : 0;
             send(kp::Channel::Control, cs);
+            klog::info("stream: {} frames {} dropped {:.1f} Mbit/s rtt {:.1f} ms decode {:.2f} ms", frames, dropped,
+                       bytes * 8 / 1e6, cs.rttUs / 1000.0, cs.decodeUsAvg / 1000.0);
             {
                 std::lock_guard l(mutex_);
                 const float secs = (now - lastStats) / 1e6f;
@@ -171,6 +173,10 @@ void StreamClient::loop() {
             }
             ++frames;
             lastFrameUs_ = recvUs;
+            if (frames == 1 && !loggedFirst_) {
+                loggedFirst_ = true;
+                klog::info("first video frame {} ({} bytes, key {})", frame->frameIndex, frame->data.size(), key);
+            }
             if (auto* dec = decoder_.load())
                 dec->submit(frame->frameIndex, frame->data.data() + kp::VideoFrameMeta::kSize,
                             frame->data.size() - kp::VideoFrameMeta::kSize, recvUs);
