@@ -12,15 +12,15 @@ Dernière mise à jour : 2026-11-06. Matériel de test : RX 6700 XT + **Meta Que
 | Pilote SteamVR : casque reconnu, direct mode, vsync 90 Hz | ✅ | vrserver « Using existing HMD kage.KAGE-HMD » |
 | Manettes vues par SteamVR comme Touch (modèles Quest Plus) avec leurs poses | ✅ | capture : manettes et rayon dans SteamVR |
 | Image SteamVR (dashboard, environnement) affichée dans le casque | ✅ | capture du casque |
-| Débit adaptatif AIMD | ✅ | oscille entre 75 et 100 Mbit/s, 0 perte |
+| Débit adaptatif AIMD | ✅ | 75–100 Mbit/s sur un Wi-Fi calme ; avec chiffrement, Wi-Fi plus chargé (transit 11–18 ms) : 55–99 Mbit/s, 17 images perdues en 88 s. Ignore les baisses de cadence de SteamVR ; le délai seul ne descend pas sous 50 Mbit/s |
 | Boutons des manettes vers les jeux | 🟡 | envoyés et câblés au profil Touch, pas encore testés en jeu |
 | Vibrations | 🟡 | chemin complet écrit, non testé |
 | Mains (suivi des mains) | 🟡 | affichées dans le lobby, non vérifiées casque porté ; pas transmises aux jeux |
 | Menu en session (appui long Menu gauche) : stats, Recentrer, Déconnecter | 🟡 | non testé casque porté |
 | Calibration automatique de la prédiction de pose | 🟡 | active, non mesurée casque porté |
 | Jeu PCVR réel testé | ❌ | à faire, casque porté |
-| Audio PC → casque | 🟡 | écrit et compilé (capture WASAPI de la sortie par défaut, PCM 16 bits brut ≈1,5 Mbit/s, AAudio basse latence, tampon 30 ms), pas encore testé dans le casque. Le son joue aussi sur le PC. Micro : non |
-| Chiffrement et appairage | 🟡 | écrit, compilé, testé en unitaire (7 tests), pas encore testé avec le casque. Appairage par code à 6 chiffres comparé casque/PC ; échange de clés X25519 statiques + éphémères (authentification mutuelle, confidentialité persistante) ; XChaCha20-Poly1305 par paquet, anti-rejeu. Bibliothèque : Monocypher 4.0.2. Restent en clair : découverte et demande de lancement de SteamVR (sans données sensibles) |
+| Audio PC → casque | 🟡 | flux reçu et lecture AAudio démarrée dans le casque (journaux), son pas encore écouté casque porté (capture WASAPI de la sortie par défaut, PCM 16 bits brut ≈1,5 Mbit/s, AAudio basse latence, tampon 30 ms), pas encore testé dans le casque. Le son joue aussi sur le PC. Micro : non |
+| Chiffrement et appairage | ✅ | testé avec le Quest 3S le 2026-11-06 : appairage par code accepté dans la GUI, session chiffrée établie, 90 images/s. Appairage par code à 6 chiffres comparé casque/PC ; échange de clés X25519 statiques + éphémères (authentification mutuelle, confidentialité persistante) ; XChaCha20-Poly1305 par paquet, anti-rejeu. Bibliothèque : Monocypher 4.0.2. Restent en clair : découverte et demande de lancement de SteamVR (sans données sensibles) |
 | USB-C | ❌ | |
 
 ## Mesures réelles (session SteamVR, 90 Hz, HEVC 3360×1760)

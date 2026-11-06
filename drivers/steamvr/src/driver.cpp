@@ -253,15 +253,24 @@ public:
     // rising 8 ms above the best seen. Back off 25 %, then probe up 5 % per calm second.
     void onStats(const kp::ClientStats& s) {
         const uint32_t net = s.networkUsAvg;
-        if (net && (net < bestNetUs_ || bestNetUs_ == 0)) bestNetUs_ = net;
-        bestNetUs_ += 50;  // slowly forget an old optimum (route/channel changes)
-        const bool congested = s.framesDropped > 0 || s.framesReceived + 5 < static_cast<uint32_t>(cfg_.refreshHz) ||
-                               (net && net > bestNetUs_ + 8000);
+        // Compare with frames actually sent: a slow SteamVR frame rate is not network congestion.
+        const uint64_t enc = encoded_.load();
+        const uint32_t sentDelta = static_cast<uint32_t>(enc - lastEncoded_);
+        lastEncoded_ = enc;
+        // Baseline = lowest per-second transit seen (0 = no frame in that report: ignored).
+        if (net && (bestNetUs_ == 0 || net < bestNetUs_)) bestNetUs_ = net;
+        if (bestNetUs_) bestNetUs_ += 50;  // slowly forget an old optimum (route/channel changes)
+        // Wi-Fi has isolated latency spikes unrelated to our rate: queueing delay must last 2 s.
+        delayStrikes_ = (net && bestNetUs_ && net > bestNetUs_ + 10000) ? delayStrikes_ + 1 : 0;
+        const bool congested = s.framesDropped > 0 || s.framesReceived + 5 < sentDelta ||
+                               delayStrikes_ >= 2;
         uint32_t br = bitrateKbps_;
         if (++reports_ <= 5) {
             // SteamVR start-up (shader compiles, dashboard loading) causes transient stalls: ignore.
         } else if (congested) {
-            br = std::max<uint32_t>(kMinKbps, br * 3 / 4);
+            const bool loss = s.framesDropped > 0 || s.framesReceived + 5 < sentDelta;
+            const uint32_t floor = loss ? kMinKbps : std::min(kDelayFloorKbps, br);
+            br = std::max<uint32_t>(floor, br * 3 / 4);
             calm_ = -2;  // hold 2 s before probing again
         } else if (++calm_ >= 1) {
             br = std::min<uint32_t>(cfg_.bitrateKbps, br + br / 10);
@@ -385,7 +394,11 @@ private:
 
     static constexpr size_t kMetaRing = 16;
     static constexpr uint32_t kMinKbps = 10'000, kStartKbps = 40'000;
-    uint32_t bitrateKbps_ = kStartKbps, bestNetUs_ = 0;
+    // Delay alone (no lost frame) never pushes below this: on a jittery Wi-Fi the delay
+    // stays high even at low rates, and cutting further only degrades the image.
+    static constexpr uint32_t kDelayFloorKbps = 50'000;
+    uint32_t bitrateKbps_ = kStartKbps, bestNetUs_ = 0, delayStrikes_ = 0;
+    uint64_t lastEncoded_ = 0;  // network thread only
     int calm_ = 0, reports_ = 0;
     std::atomic<uint32_t> pendingBitrate_{0};
 
