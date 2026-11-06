@@ -1,4 +1,4 @@
-﻿#include "rift_tracking.hpp"
+#include "rift_tracking.hpp"
 
 #include <windows.h>
 
@@ -60,7 +60,7 @@ Q slerp(Q a, Q b, double t) {
 
 // One Euro filter (Casiez et al. 2012): cutoff rises with speed.
 struct OneEuro {
-    double minCutoff = 1.5, beta = 0.6, dCutoff = 1.0;
+    double minCutoff = 4.0, beta = 4.0, dCutoff = 1.0;  // light: the Rift output is already smooth
     bool init = false;
     V3 x, dx;
     Q q;
@@ -244,6 +244,7 @@ struct RiftTracking::Impl {
                            {"KAGE-RIFT-WAIST", "TrackerRole_Waist", "vive_tracker_waist"}};
     OneEuro filters[3];
     std::mutex m;
+    std::atomic<double> predictS{0.04};  // Quest prediction horizon (s)
     Calibration calib;
     bool refValid = false;
     Q refQ;
@@ -269,17 +270,20 @@ struct RiftTracking::Impl {
     void loop() {
         const auto request = dir / L"calibrate.request";
         std::vector<std::pair<Q, V3>> sa, sb;
-        double calibEnd = 0, lastSample = 0, last = ovr_GetTimeInSeconds(), lastCheck = 0;
+        double calibEnd = 0, calibStart = 0, lastSample = 0, last = ovr_GetTimeInSeconds(), lastCheck = 0;
         int lastTracked = -1;
         while (running) {
             const double now = ovr_GetTimeInSeconds();
             const double dt = now - last;
             last = now;
-            const ovrTrackingState ts = ovr_GetTrackingState(session, now, ovrFalse);
+            // Predict to the same instant as the Quest poses (its display time), else the trackers
+            // trail the controllers by the whole streaming latency.
+            const double at = now + predictS.load();
+            const ovrTrackingState ts = ovr_GetTrackingState(session, at, ovrFalse);
             ovrTrackedDeviceType objType = ovrTrackedDevice_Object0;
             ovrPoseStatef obj{};
             const bool objOk = (ovr_GetConnectedControllerTypes(session) & ovrControllerType_Object0) &&
-                               OVR_SUCCESS(ovr_GetDevicePoses(session, &objType, 1, now, &obj));
+                               OVR_SUCCESS(ovr_GetDevicePoses(session, &objType, 1, at, &obj));
             const ovrPoseStatef* src[3] = {&ts.HandPoses[0], &ts.HandPoses[1], objOk ? &obj : nullptr};
             const unsigned flags[3] = {ts.HandStatusFlags[0], ts.HandStatusFlags[1], objOk ? static_cast<unsigned>(ovrStatus_PositionTracked) : 0u};  // no status for objects
             Calibration c;
@@ -303,19 +307,20 @@ struct RiftTracking::Impl {
             }
 
             // Calibration: Rift right Touch held against the Quest right controller.
-            if (now - lastCheck > 1.0) {
+            if (now - lastCheck > 0.25) {  // keep in step with the headset countdown
                 lastCheck = now;
                 std::error_code ec;
                 if (calibEnd == 0 && std::filesystem::exists(request, ec)) {
                     std::filesystem::remove(request, ec);
                     sa.clear();
                     sb.clear();
-                    calibEnd = now + 15;
-                    status("Calibration : tiens la manette droite du Rift collée à celle du Quest et fais-les tourner dans tous les sens (15 s)");
+                    calibStart = now + 3;  // countdown so the user can get in position
+                    calibEnd = now + 28;
+                    status("Calibration dans 3 s : colle la manette droite du Rift à celle du Quest, puis tourne-les LENTEMENT dans tous les sens pendant 25 s");
                 }
             }
             if (calibEnd > 0) {
-                if (now - lastSample > 0.05) {
+                if (now >= calibStart && now - lastSample > 0.05) {
                     lastSample = now;
                     std::lock_guard l(m);
                     if (refValid && (ts.HandStatusFlags[1] & ovrStatus_PositionTracked)) {
@@ -395,7 +400,8 @@ void RiftTracking::stop() {
     d.session = nullptr;
 }
 
-void RiftTracking::setReference(const protocol::ControllerState& c) {
+void RiftTracking::setReference(const protocol::ControllerState& c, double predictionS) {
+    impl_->predictS = predictionS > 0 && predictionS < 0.2 ? predictionS : 0.04;
     auto& d = *impl_;
     std::lock_guard l(d.m);
     d.refValid = (c.flags & protocol::kPoseValid) != 0;

@@ -25,7 +25,8 @@ public:
     bool start(const std::filesystem::path& dataDir);
     void stop();
     // Quest right controller grip pose (stage space), from the network thread.
-    void setReference(const protocol::ControllerState& questRight);
+    // predictionS: how far ahead the Quest predicted its poses (Rift is predicted the same).
+    void setReference(const protocol::ControllerState& questRight, double predictionS);
     bool started() const;
 
 private:

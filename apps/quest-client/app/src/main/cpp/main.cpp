@@ -552,7 +552,7 @@ private:
             overlay_ = false;
         } else if (id == kBtnCalibrate) {
             stream_.requestFullBodyCalibration();
-            calibUntilUs_ = monotonicMicros() + 15'000'000;
+            calibUntilUs_ = monotonicMicros() + 28'000'000;  // 3 s countdown + 25 s of samples
         } else if (id == kBtnRecenter && ctx_.headValid) {
             panel_.placeInFront(ctx_.head, 0.9f);
         }
@@ -678,7 +678,11 @@ private:
             };
             line(std::format("Connecté à {}", target_.name), palette::kCyan);
             if (const uint64_t now = monotonicMicros(); now < calibUntilUs_)
-                line(std::format("Calibration : manettes droites Rift + Quest collées, tourne-les ({} s)", (calibUntilUs_ - now) / 1'000'000 + 1), palette::kWarn);
+                {
+                const uint64_t left = (calibUntilUs_ - now) / 1'000'000 + 1;
+                if (left > 25) line(std::format("Prépare-toi : colle les manettes DROITES Rift + Quest ({} s)", left - 25), palette::kWarn);
+                else line(std::format("Tourne-les LENTEMENT dans tous les sens ({} s)", left), palette::kWarn);
+            }
             line(std::format("Images reçues : {:.0f} /s   Débit : {:.1f} Mbit/s", s.fps, s.mbps));
             line(std::format("Aller-retour réseau : {}   Transit : {}", ms(s.rttMs), ms(s.networkMs)));
             line(std::format("Décodage : {}   Images perdues : {}/s", ms(s.decodeMs), s.dropped));

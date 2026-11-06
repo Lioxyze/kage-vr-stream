@@ -545,7 +545,7 @@ public:
         server_.onTracking = [this](const kp::TrackingState& t) {
             if (auto* h = hmd_.load()) h->update(t);
 #ifdef KAGE_WITH_RIFT
-            rift_.setReference(t.controllers[1]);
+            rift_.setReference(t.controllers[1], (static_cast<double>(t.predictedDisplayTimeUs) - static_cast<double>(t.sampleTimeUs)) / 1e6);
 #endif
             for (auto& p : ctrlPtr_)
                 if (auto* c = p.load()) c->update(t.controllers[static_cast<int>(c->hand())]);
