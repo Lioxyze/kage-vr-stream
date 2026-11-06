@@ -67,10 +67,12 @@ vr::DriverPose_t makePose(const kp::Pose& p, bool valid, bool connected) {
 // The headset sends the OpenXR *grip* pose; SteamVR's Touch profile (and games'
 // hand models) expect the native Oculus controller frame, which is tilted and
 // shifted relative to grip. Default offset (left hand; x mirrored for the right):
-// same values as ALVR's Touch emulation. Tunable live without rebuilding through
+// derived from SteamVR's own render model data. Tunable live without rebuilding through
 // %LOCALAPPDATA%\KageVR\controller_offset.txt: "x y z pitchDeg" (meters, grip frame).
 struct ControllerOffset {
-    float x = -0.0065f, y = 0.002f, z = -0.051f, pitchDeg = 40.f;
+    // Inverse of the "openxr_grip" component of SteamVR's oculus_quest_plus_controller
+    // render model (grip at (0.007,-0.0018,0.1019), 20.6 deg about X in model space).
+    float x = -0.007f, y = -0.0342f, z = -0.0961f, pitchDeg = -20.6f;
 };
 std::mutex g_offsetMutex;
 ControllerOffset g_offset;
