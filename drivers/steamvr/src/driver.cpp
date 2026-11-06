@@ -72,7 +72,8 @@ vr::DriverPose_t makePose(const kp::Pose& p, bool valid, bool connected) {
 struct ControllerOffset {
     // Inverse of the "openxr_grip" component of SteamVR's oculus_quest_plus_controller
     // render model (grip at (0.007,-0.0018,0.1019), 20.6 deg about X in model space).
-    float x = -0.007f, y = -0.0342f, z = -0.0961f, pitchDeg = -20.6f;
+    // x then tuned by eye on a Quest 3S (+1 cm towards the other hand).
+    float x = 0.003f, y = -0.0342f, z = -0.0961f, pitchDeg = -20.6f;
 };
 std::mutex g_offsetMutex;
 ControllerOffset g_offset;
