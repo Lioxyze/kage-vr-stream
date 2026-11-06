@@ -89,6 +89,13 @@ MessageType typeOf(const Message& m) {
                           [](const Heartbeat&) { return MessageType::Heartbeat; },
                           [](const Disconnect&) { return MessageType::Disconnect; },
                           [](const TrackingState&) { return MessageType::TrackingState; },
+                          [](const ConnectRequest&) { return MessageType::ConnectRequest; },
+                          [](const ConnectReply&) { return MessageType::ConnectReply; },
+                          [](const StreamHello&) { return MessageType::StreamHello; },
+                          [](const StreamConfig&) { return MessageType::StreamConfig; },
+                          [](const IdrRequest&) { return MessageType::IdrRequest; },
+                          [](const Haptics&) { return MessageType::Haptics; },
+                          [](const ClientStats&) { return MessageType::ClientStats; },
                       },
                       m);
 }
@@ -127,6 +134,46 @@ void encodeMessage(const Message& m, std::vector<uint8_t>& out) {
                        w.u8(t.headFlags);
                        writePose(w, t.head);
                        for (const auto& c : t.controllers) writeController(w, c);
+                   },
+                   [&](const ConnectRequest& c) { w.str(c.clientName.substr(0, kMaxNameLength)); },
+                   [&](const ConnectReply& c) {
+                       w.u8(static_cast<uint8_t>(c.status));
+                       w.u16(c.streamPort);
+                   },
+                   [&](const StreamHello& h) {
+                       w.u32(h.eyeWidth);
+                       w.u32(h.eyeHeight);
+                       w.f32(h.refreshHz);
+                       for (const auto& f : h.fov) {
+                           w.f32(f.left);
+                           w.f32(f.right);
+                           w.f32(f.up);
+                           w.f32(f.down);
+                       }
+                       w.f32(h.ipdMeters);
+                       w.u8(h.codecs);
+                       w.u32(h.maxBitrateKbps);
+                   },
+                   [&](const StreamConfig& c) {
+                       w.u8(c.codec);
+                       w.u32(c.width);
+                       w.u32(c.height);
+                       w.f32(c.refreshHz);
+                       w.u32(c.bitrateKbps);
+                   },
+                   [&](const IdrRequest& r) { w.u32(r.lastFrameIndex); },
+                   [&](const Haptics& h) {
+                       w.u8(static_cast<uint8_t>(h.hand));
+                       w.u32(h.durationUs);
+                       w.f32(h.frequency);
+                       w.f32(h.amplitude);
+                   },
+                   [&](const ClientStats& s) {
+                       w.u32(s.framesReceived);
+                       w.u32(s.framesDropped);
+                       w.u32(s.decodeUsAvg);
+                       w.u32(s.networkUsAvg);
+                       w.u32(s.rttUs);
                    },
                },
                m);
@@ -202,11 +249,106 @@ std::optional<Message> decodeMessage(std::span<const uint8_t> payload) {
             result = std::move(t);
             break;
         }
+        case MessageType::ConnectRequest: {
+            ConnectRequest c;
+            r.str(c.clientName, kMaxNameLength);
+            result = std::move(c);
+            break;
+        }
+        case MessageType::ConnectReply: {
+            ConnectReply c;
+            uint8_t st = 0;
+            r.u8(st);
+            if (st > static_cast<uint8_t>(ConnectStatus::Failed)) r.fail();
+            c.status = static_cast<ConnectStatus>(st);
+            r.u16(c.streamPort);
+            if (c.streamPort == 0) r.fail();
+            result = c;
+            break;
+        }
+        case MessageType::StreamHello: {
+            StreamHello h;
+            r.u32(h.eyeWidth);
+            r.u32(h.eyeHeight);
+            readFloatIn(r, h.refreshHz, 30.f, 240.f);
+            constexpr float kMaxAngle = 1.56f;  // < 90 degrees
+            for (auto& f : h.fov) {
+                readFloatIn(r, f.left, -kMaxAngle, 0.5f);
+                readFloatIn(r, f.right, -0.5f, kMaxAngle);
+                readFloatIn(r, f.up, -0.5f, kMaxAngle);
+                readFloatIn(r, f.down, -kMaxAngle, 0.5f);
+            }
+            readFloatIn(r, h.ipdMeters, 0.04f, 0.09f);
+            r.u8(h.codecs);
+            r.u32(h.maxBitrateKbps);
+            if (r.ok() && (h.eyeWidth < 256 || h.eyeWidth > 4096 || h.eyeHeight < 256 || h.eyeHeight > 4096 ||
+                           (h.codecs & ~(kCodecH264 | kCodecHEVC)) || !h.codecs))
+                r.fail();
+            result = h;
+            break;
+        }
+        case MessageType::StreamConfig: {
+            StreamConfig c;
+            r.u8(c.codec);
+            r.u32(c.width);
+            r.u32(c.height);
+            readFloatIn(r, c.refreshHz, 30.f, 240.f);
+            r.u32(c.bitrateKbps);
+            if (r.ok() && ((c.codec != kCodecH264 && c.codec != kCodecHEVC) || c.width < 256 || c.width > 8192 ||
+                           c.height < 256 || c.height > 4096))
+                r.fail();
+            result = c;
+            break;
+        }
+        case MessageType::IdrRequest: {
+            IdrRequest q;
+            r.u32(q.lastFrameIndex);
+            result = q;
+            break;
+        }
+        case MessageType::Haptics: {
+            Haptics h;
+            uint8_t hand = 0;
+            r.u8(hand);
+            if (hand > 1) r.fail();
+            h.hand = static_cast<Hand>(hand);
+            r.u32(h.durationUs);
+            readFloatIn(r, h.frequency, 0.f, 10000.f);
+            readFloatIn(r, h.amplitude, 0.f, 1.f);
+            result = h;
+            break;
+        }
+        case MessageType::ClientStats: {
+            ClientStats s;
+            r.u32(s.framesReceived);
+            r.u32(s.framesDropped);
+            r.u32(s.decodeUsAvg);
+            r.u32(s.networkUsAvg);
+            r.u32(s.rttUs);
+            result = s;
+            break;
+        }
         default:
             return std::nullopt;
     }
     if (!r.ok() || r.remaining() != 0) return std::nullopt;
     return result;
+}
+
+void encodeFrameMeta(const VideoFrameMeta& m, std::vector<uint8_t>& out) {
+    Writer w(out);
+    w.u64(m.trackingTimeUs);
+    for (float v : m.renderPose.position) w.f32(v);
+    for (float v : m.renderPose.orientation) w.f32(v);
+}
+
+bool decodeFrameMeta(std::span<const uint8_t> in, VideoFrameMeta& m) {
+    if (in.size() < VideoFrameMeta::kSize) return false;
+    Reader r(in.first(VideoFrameMeta::kSize));
+    r.u64(m.trackingTimeUs);
+    for (float& v : m.renderPose.position) readFloatIn(r, v, -kMaxPosition, kMaxPosition);
+    for (float& v : m.renderPose.orientation) readFloatIn(r, v, -1.001f, 1.001f);
+    return r.ok();
 }
 
 }  // namespace kage::protocol

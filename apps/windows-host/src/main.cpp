@@ -5,8 +5,11 @@
 //   kage-host discover                   broadcast a probe on the LAN, list hosts
 //   kage-host ping <ip> [--count N]      measure RTT / jitter / loss to a host
 #include <windows.h>
+#include <tlhelp32.h>
 
 #include <atomic>
+#include <filesystem>
+#include <optional>
 #include <cstdio>
 #include <format>
 #include <string>
@@ -59,7 +62,8 @@ int usage() {
           "  kage-host probe [--json]\n"
           "  kage-host serve [--name NAME] [--discovery-port P] [--control-port P]\n"
           "  kage-host discover\n"
-          "  kage-host ping <ip> [--port P] [--count N] [--interval-ms MS]\n");
+          "  kage-host ping <ip> [--port P] [--count N] [--interval-ms MS]\n"
+          "  kage-host install-driver | remove-driver | launch-steamvr\n");
     return 2;
 }
 
@@ -69,6 +73,77 @@ int cmdProbe(const std::vector<std::string>& a) {
     return 0;
 }
 
+bool processRunning(const wchar_t* exe) {
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return false;
+    PROCESSENTRY32W pe{sizeof pe};
+    bool found = false;
+    for (BOOL ok = Process32FirstW(snap, &pe); ok && !found; ok = Process32NextW(snap, &pe))
+        found = _wcsicmp(pe.szExeFile, exe) == 0;
+    CloseHandle(snap);
+    return found;
+}
+
+std::wstring widen(const std::string& s) {
+    const int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+    std::wstring w(static_cast<size_t>(n ? n - 1 : 0), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, w.data(), n);
+    return w;
+}
+
+std::optional<std::wstring> steamVrBin(const wchar_t* exe) {
+    for (const auto& r : kage::host::probeSystem().steamvr.runtimePaths) {
+        std::wstring p = widen(r) + L"\\bin\\win64\\" + exe;
+        if (GetFileAttributesW(p.c_str()) != INVALID_FILE_ATTRIBUTES) return p;
+    }
+    return std::nullopt;
+}
+
+kage::protocol::ConnectStatus launchSteamVr() {
+    using kage::protocol::ConnectStatus;
+    if (processRunning(L"vrserver.exe")) return ConnectStatus::AlreadyRunning;
+    auto exe = steamVrBin(L"vrstartup.exe");
+    if (!exe) return ConnectStatus::SteamVrMissing;
+    STARTUPINFOW si{sizeof si};
+    PROCESS_INFORMATION pi{};
+    std::wstring cmd = L"\"" + *exe + L"\"";
+    if (!CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, DETACHED_PROCESS, nullptr, nullptr, &si, &pi))
+        return ConnectStatus::Failed;
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    kage::log::info("SteamVR launched");
+    return ConnectStatus::Launching;
+}
+
+// vrpathreg adddriver/removedriver <dir>: the documented way to register an external SteamVR driver.
+int cmdDriver(bool add) {
+    auto reg = steamVrBin(L"vrpathreg.exe");
+    if (!reg) {
+        print("SteamVR introuvable.\n");
+        return 1;
+    }
+    wchar_t self[MAX_PATH];
+    GetModuleFileNameW(nullptr, self, MAX_PATH);
+    // kage-host.exe is in build/apps/windows-host/<Config>/ ; the driver in build/driver/kage
+    std::filesystem::path dir = std::filesystem::path(self).parent_path() / L"../../../driver/kage";
+    dir = std::filesystem::weakly_canonical(dir);
+    if (add && !std::filesystem::exists(dir / L"driver.vrdrivermanifest")) {
+        print("Pilote non compilé (build\\driver\\kage introuvable).\n");
+        return 1;
+    }
+    std::wstring cmd = L"\"" + *reg + L"\" " + (add ? L"adddriver" : L"removedriver") + L" \"" + dir.wstring() + L"\"";
+    STARTUPINFOW si{sizeof si};
+    PROCESS_INFORMATION pi{};
+    if (!CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) return 1;
+    WaitForSingleObject(pi.hProcess, 10000);
+    DWORD code = 1;
+    GetExitCodeProcess(pi.hProcess, &code);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    print(std::format("Pilote {} : {} ({})\n", add ? "enregistré" : "retiré", code == 0 ? "OK" : "échec", dir.string()));
+    return static_cast<int>(code);
+}
+
 int cmdServe(const std::vector<std::string>& a) {
     kage::session::HostServiceConfig cfg;
     cfg.hostName = argValue(a, "--name", computerName());
@@ -76,6 +151,15 @@ int cmdServe(const std::vector<std::string>& a) {
     cfg.controlPort = static_cast<uint16_t>(std::stoi(argValue(a, "--control-port", "47801")));
     kage::session::HostService svc(cfg);
     svc.onEvent = [](const std::string& e) { kage::log::info("{}", e); };
+    svc.onConnect = [](const std::string& client) {
+        const auto st = launchSteamVr();
+        kage::log::info("session requested by '{}': {}", client,
+                        st == kage::protocol::ConnectStatus::Launching         ? "launching SteamVR"
+                        : st == kage::protocol::ConnectStatus::AlreadyRunning ? "SteamVR already running"
+                        : st == kage::protocol::ConnectStatus::SteamVrMissing ? "SteamVR not found"
+                                                                              : "launch failed");
+        return st;
+    };
     if (!svc.start()) return 1;
     kage::log::info("host '{}' ready. Windows may ask to allow kage-host on private networks (UDP {}/{}). Ctrl+C to stop.",
                     cfg.hostName, svc.discoveryPort(), svc.controlPort());
@@ -151,6 +235,9 @@ int main(int argc, char** argv) {
         if (a[0] == "serve") return cmdServe(a);
         if (a[0] == "discover") return cmdDiscover();
         if (a[0] == "ping") return cmdPing(a);
+        if (a[0] == "install-driver") return cmdDriver(true);
+        if (a[0] == "remove-driver") return cmdDriver(false);
+        if (a[0] == "launch-steamvr") return launchSteamVr() == kage::protocol::ConnectStatus::Launching ? 0 : 1;
     } catch (const std::exception& e) {
         kage::log::error("invalid arguments: {}", e.what());
         return 2;

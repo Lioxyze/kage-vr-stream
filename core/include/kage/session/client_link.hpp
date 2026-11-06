@@ -7,6 +7,7 @@
 #include <string>
 
 #include "kage/net/udp_socket.hpp"
+#include "kage/protocol/messages.hpp"
 #include "kage/sync/clock_sync.hpp"
 
 namespace kage::session {
@@ -23,6 +24,10 @@ public:
 
     // Sends one probe to `target` (usually broadcast:47800) and waits for an answer.
     std::optional<DiscoveredHost> discover(const net::Endpoint& target, const std::string& clientName, int timeoutMs);
+
+    // Asks the host to start SteamVR. Returns the host's answer or nullopt on timeout.
+    std::optional<protocol::ConnectReply> requestConnect(const net::Endpoint& control, const std::string& clientName,
+                                                         int timeoutMs);
 
     // One Ping/Pong round trip. Updates clock() on success and returns the sample.
     std::optional<sync::ClockSample> ping(const net::Endpoint& control, int timeoutMs);

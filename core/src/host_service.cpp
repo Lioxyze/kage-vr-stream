@@ -97,6 +97,19 @@ void HostService::controlLoop() {
             continue;
         }
         auto msg = decodeMessage(body);
+        if (const auto* cr = msg ? std::get_if<ConnectRequest>(&*msg) : nullptr) {
+            ConnectReply reply;
+            reply.status = onConnect ? onConnect(cr->clientName) : ConnectStatus::Failed;
+            encodeMessage(reply, payload);
+            PacketHeader rh;
+            rh.channel = Channel::Control;
+            rh.sequence = seq++;
+            rh.sendTimeUs = monotonicMicros();
+            encodePacket(rh, payload, out);
+            control_.sendTo(from, out);
+            if (onEvent) onEvent(std::format("connect request from {} ('{}')", from.toString(), cr->clientName));
+            continue;
+        }
         const auto* ping = msg ? std::get_if<Ping>(&*msg) : nullptr;
         if (!ping) {
             ++counters_.packetsRejected;  // Phase 2: authenticated session messages

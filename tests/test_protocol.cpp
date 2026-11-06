@@ -208,6 +208,43 @@ TEST(messages_reject_trailing_and_truncated) {
     CHECK(!decodeMessage(buf));
 }
 
+TEST(stream_messages_roundtrip) {
+    StreamHello h;
+    h.eyeWidth = 1680;
+    h.eyeHeight = 1760;
+    h.refreshHz = 90;
+    h.fov[0] = {-0.94f, 0.80f, 0.87f, -0.93f};
+    h.fov[1] = {-0.80f, 0.94f, 0.87f, -0.93f};
+    h.ipdMeters = 0.064f;
+    auto h2 = roundtrip(h);
+    CHECK(h2.eyeWidth == 1680 && h2.refreshHz == 90 && h2.fov[1].right == 0.94f && h2.ipdMeters == 0.064f);
+
+    auto c = roundtrip(StreamConfig{kCodecHEVC, 3360, 1760, 90, 100000});
+    CHECK(c.width == 3360 && c.codec == kCodecHEVC && c.bitrateKbps == 100000);
+    auto hp = roundtrip(Haptics{Hand::Right, 20000, 160, 0.5f});
+    CHECK(hp.hand == Hand::Right && hp.amplitude == 0.5f);
+    auto cr = roundtrip(ConnectReply{ConnectStatus::Launching, 47802});
+    CHECK(cr.status == ConnectStatus::Launching);
+
+    StreamHello bad = h;
+    bad.eyeWidth = 100000;
+    std::vector<uint8_t> buf;
+    encodeMessage(bad, buf);
+    CHECK(!decodeMessage(buf));
+    StreamConfig badc{0x3, 3360, 1760, 90, 1};  // two codecs at once
+    encodeMessage(badc, buf);
+    CHECK(!decodeMessage(buf));
+
+    VideoFrameMeta m;
+    m.trackingTimeUs = 123;
+    m.renderPose.position = {1, 2, 3};
+    std::vector<uint8_t> mb;
+    encodeFrameMeta(m, mb);
+    CHECK(mb.size() == VideoFrameMeta::kSize);
+    VideoFrameMeta m2;
+    CHECK(decodeFrameMeta(mb, m2) && m2.trackingTimeUs == 123 && m2.renderPose.position[2] == 3);
+}
+
 TEST(fuzz_random_inputs_do_not_crash) {
     std::mt19937 rng(1234);
     std::vector<uint8_t> buf;

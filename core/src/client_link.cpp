@@ -69,6 +69,28 @@ std::optional<DiscoveredHost> ClientLink::discover(const net::Endpoint& target, 
     return found;
 }
 
+std::optional<ConnectReply> ClientLink::requestConnect(const net::Endpoint& control, const std::string& clientName,
+                                                      int timeoutMs) {
+    if (!sock_.valid()) return std::nullopt;
+    std::vector<uint8_t> payload, out;
+    encodeMessage(ConnectRequest{clientName}, payload);
+    PacketHeader h;
+    h.channel = Channel::Control;
+    h.sequence = seq_++;
+    h.sendTimeUs = monotonicMicros();
+    encodePacket(h, payload, out);
+    if (!sock_.sendTo(control, out)) return std::nullopt;
+    std::optional<ConnectReply> reply;
+    receiveUntil(sock_, monotonicMicros() + static_cast<uint64_t>(timeoutMs) * 1000,
+                 [&](const PacketHeader& rh, const Message& m, const net::Endpoint& from, uint64_t) {
+                     const auto* r = std::get_if<ConnectReply>(&m);
+                     if (rh.channel != Channel::Control || !r || !(from == control)) return false;
+                     reply = *r;
+                     return true;
+                 });
+    return reply;
+}
+
 std::optional<sync::ClockSample> ClientLink::ping(const net::Endpoint& control, int timeoutMs) {
     if (!sock_.valid()) return std::nullopt;
     const uint32_t id = nextPingId_++;

@@ -28,7 +28,18 @@ enum class MessageType : uint8_t {
     Heartbeat = 12,
     Disconnect = 13,
     TrackingState = 20,
+    ConnectRequest = 30,  // client -> kage-host: please start SteamVR
+    ConnectReply = 31,
+    StreamHello = 40,     // client -> driver (47802), repeated until StreamConfig
+    StreamConfig = 41,    // driver -> client
+    IdrRequest = 42,      // client -> driver: lost reference, need a keyframe
+    Haptics = 43,         // driver -> client
+    ClientStats = 44,     // client -> driver, ~1 Hz, feeds bitrate control
 };
+
+inline constexpr uint16_t kDefaultStreamPort = 47802;
+
+enum CodecMask : uint8_t { kCodecH264 = 1u << 0, kCodecHEVC = 1u << 1 };
 
 // Client -> broadcast. "Is there a KAGE host on this LAN?"
 struct DiscoveryProbe {
@@ -112,6 +123,7 @@ enum ControllerButton : uint32_t {
     kButtonThumbstick = 1u << 5,
     kButtonTrigger = 1u << 6,
     kButtonGrip = 1u << 7,
+    kButtonThumbrest = 1u << 8,  // touch only
 };
 
 struct TrackingState {
@@ -122,7 +134,71 @@ struct TrackingState {
     std::array<ControllerState, 2> controllers{};
 };
 
-using Message = std::variant<DiscoveryProbe, DiscoveryAnnounce, Ping, Pong, Heartbeat, Disconnect, TrackingState>;
+struct ConnectRequest {
+    std::string clientName;
+};
+
+enum class ConnectStatus : uint8_t { Launching = 0, AlreadyRunning = 1, SteamVrMissing = 2, Failed = 3 };
+
+struct ConnectReply {
+    ConnectStatus status = ConnectStatus::Failed;
+    uint16_t streamPort = kDefaultStreamPort;
+};
+
+// Field of view as tangent-free OpenXR angles (radians): left/down negative.
+struct Fov {
+    float left = 0, right = 0, up = 0, down = 0;
+};
+
+struct StreamHello {
+    uint32_t eyeWidth = 0;   // recommended render size per eye
+    uint32_t eyeHeight = 0;
+    float refreshHz = 72;
+    std::array<Fov, 2> fov{};
+    float ipdMeters = 0.063f;
+    uint8_t codecs = kCodecHEVC | kCodecH264;  // decoders available on the client
+    uint32_t maxBitrateKbps = 150000;
+};
+
+struct StreamConfig {
+    uint8_t codec = kCodecHEVC;  // exactly one bit
+    uint32_t width = 0;          // encoded frame (both eyes side by side)
+    uint32_t height = 0;
+    float refreshHz = 72;
+    uint32_t bitrateKbps = 0;
+};
+
+struct IdrRequest {
+    uint32_t lastFrameIndex = 0;
+};
+
+struct Haptics {
+    Hand hand = Hand::Left;
+    uint32_t durationUs = 0;
+    float frequency = 0;  // Hz, 0 = runtime default
+    float amplitude = 0;  // [0,1]
+};
+
+struct ClientStats {
+    uint32_t framesReceived = 0;  // since previous report
+    uint32_t framesDropped = 0;   // incomplete / late, since previous report
+    uint32_t decodeUsAvg = 0;
+    uint32_t networkUsAvg = 0;    // first fragment -> frame complete
+    uint32_t rttUs = 0;
+};
+
+// Prefix of every encoded video frame (inside the reassembled frame bytes).
+struct VideoFrameMeta {
+    static constexpr size_t kSize = 8 + 7 * 4;
+    uint64_t trackingTimeUs = 0;  // client-clock sampleTime of the TrackingState used to render
+    Pose renderPose;              // head pose used by SteamVR (position + orientation only)
+};
+
+void encodeFrameMeta(const VideoFrameMeta& m, std::vector<uint8_t>& out);  // appends
+bool decodeFrameMeta(std::span<const uint8_t> in, VideoFrameMeta& m);
+
+using Message = std::variant<DiscoveryProbe, DiscoveryAnnounce, Ping, Pong, Heartbeat, Disconnect, TrackingState,
+                             ConnectRequest, ConnectReply, StreamHello, StreamConfig, IdrRequest, Haptics, ClientStats>;
 
 MessageType typeOf(const Message& m);
 

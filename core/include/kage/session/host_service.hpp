@@ -12,6 +12,7 @@
 #include <thread>
 
 #include "kage/net/udp_socket.hpp"
+#include "kage/protocol/messages.hpp"
 
 namespace kage::session {
 
@@ -40,8 +41,10 @@ public:
     uint16_t controlPort() const { return controlPort_; }
     const HostServiceCounters& counters() const { return counters_; }
 
-    // Optional hook, called from the service threads (must be thread-safe).
+    // Optional hooks, called from the service threads (must be thread-safe).
     std::function<void(const std::string&)> onEvent;
+    // Headset asked to start a session; returns what to answer. Unset = Failed.
+    std::function<protocol::ConnectStatus(const std::string& clientName)> onConnect;
 
 private:
     void discoveryLoop();

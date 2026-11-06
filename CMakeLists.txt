@@ -16,6 +16,7 @@ if(KAGE_BUILD_HOST)
         message(FATAL_ERROR "The host application targets Windows only")
     endif()
     add_subdirectory(apps/windows-host)
+    add_subdirectory(drivers/steamvr)
 endif()
 
 if(KAGE_BUILD_TESTS)
