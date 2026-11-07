@@ -410,8 +410,30 @@ private:
             hello.refreshHz = static_cast<float>(streamFps_);  // SteamVR renders at this rate
             std::array<XrFovf, 2> fov{};
             float ipd = 0.063f;
-            if (xr_.eyeFovAndIpd(fov, ipd))
-                for (int i = 0; i < 2; ++i) hello.fov[i] = {fov[i].angleLeft, fov[i].angleRight, fov[i].angleUp, fov[i].angleDown};
+            streamFovSet_ = false;
+            if (xr_.eyeFovAndIpd(fov, ipd)) {
+                // Overscan: render a wider view than displayed so the headset reprojection
+                // (pose at render vs at display) never uncovers the frame border. The
+                // resolution grows with the tangent span to keep the pixel density.
+                constexpr float kMarginH = 0.12f, kMarginV = 0.08f;  // rad (~7 deg / ~4.5 deg)
+                float sx = 0, sy = 0;
+                for (int i = 0; i < 2; ++i) {
+                    XrFovf f = fov[i];
+                    const float w0 = std::tan(f.angleRight) - std::tan(f.angleLeft), h0 = std::tan(f.angleUp) - std::tan(f.angleDown);
+                    f.angleLeft -= kMarginH;
+                    f.angleRight += kMarginH;
+                    f.angleUp += kMarginV;
+                    f.angleDown -= kMarginV;
+                    sx = std::max(sx, (std::tan(f.angleRight) - std::tan(f.angleLeft)) / w0);
+                    sy = std::max(sy, (std::tan(f.angleUp) - std::tan(f.angleDown)) / h0);
+                    streamFov_[i] = f;
+                    hello.fov[i] = {f.angleLeft, f.angleRight, f.angleUp, f.angleDown};
+                }
+                // Cap the growth: keep the encoder load close to before (sharpness vs edges).
+                hello.eyeWidth = static_cast<uint32_t>(hello.eyeWidth * std::min(sx, 1.15f)) & ~15u;
+                hello.eyeHeight = static_cast<uint32_t>(hello.eyeHeight * std::min(sy, 1.12f)) & ~15u;
+                streamFovSet_ = true;
+            }
             hello.ipdMeters = std::clamp(ipd, 0.045f, 0.085f);
             hello.codecs = kp::kCodecHEVC | kp::kCodecH264;
             hello.maxBitrateKbps = 150'000;
@@ -503,7 +525,10 @@ private:
         const auto& rp = frameMeta_.renderPose;
         const XrPosef render{{rp.orientation[0], rp.orientation[1], rp.orientation[2], rp.orientation[3]},
                              {rp.position[0], rp.position[1], rp.position[2]}};
-        for (int i = 0; i < 2; ++i) c.submitPose[i] = xm::compose(render, c.eyeInHead[i]);
+        for (int i = 0; i < 2; ++i) {
+            c.submitPose[i] = xm::compose(render, c.eyeInHead[i]);
+            if (streamFovSet_) c.submitFov[i] = streamFov_[i];  // overscanned frame: no black edges on head turns
+        }
         ctx_ = c;
         if (!stream_.videoFlowing()) {
             if (!lostSinceUs_) lostSinceUs_ = monotonicMicros();
@@ -741,6 +766,8 @@ private:
     kage::crypto::KeyPair identity_;
     std::optional<uint32_t> pairCode_;
     int streamFps_ = 60;
+    std::array<XrFovf, 2> streamFov_{};
+    bool streamFovSet_ = false;
     uint64_t calibUntilUs_ = 0;
     uint64_t menuPulseUntil_ = 0;  // short press on left Menu -> SteamVR system click
     uint64_t connectStartUs_ = 0, lostSinceUs_ = 0, menuDownAt_ = 0;
