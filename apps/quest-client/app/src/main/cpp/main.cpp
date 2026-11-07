@@ -240,7 +240,7 @@ struct Quality {
     float scale;
     uint32_t kbps;
 };
-constexpr Quality kQualities[] = {{"Basse", 0.75f, 40000}, {"Moyenne", 0.9f, 80000}, {"Haute", 1.0f, 150000}, {"Max", 1.2f, 200000}};
+constexpr Quality kQualities[] = {{"Basse", 1.0f, 40000}, {"Moyenne", 1.0f, 80000}, {"Haute", 1.0f, 150000}, {"Max", 1.0f, 200000}}  // resolution scaling distorts the view (to debug): bitrate only;
 
 class Panel {
 public:
