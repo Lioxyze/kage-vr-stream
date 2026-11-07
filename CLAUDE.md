@@ -42,3 +42,5 @@ Full body CV1 : LibOVR lu HORS de SteamVR par kage-host (apps/windows-host/src/r
 
 ## Architecture du streaming
 Quest → `StreamHello` (FOV, IPD, Hz, résolution) → pilote ; Quest → `TrackingState` à chaque frame ; pilote → `VideoFrame` fragmenté (HEVC AMF, côte à côte, pose de rendu incluse) ; Quest soumet la couche de projection avec **la pose de rendu** pour que le runtime fasse la reprojection. Images incomplètes abandonnées + demande IDR. Audio : canal 5, u32 fréquence + PCM int16 stéréo. Avant tout : PairRequest (47801, code 6 chiffres confirmé dans la GUI) puis SecureHello/SecureAccept (47802), ensuite tout est chiffré (+24 o/paquet).
+
+Mises à jour : scripts/release.ps1 publie dist/KageVR-Portable.zip (+ .sha256) dans le dépôt PUBLIC Lioxyze/kage-vr-releases (binaires seulement ; code privé dans Lioxyze/kage-vr-stream). Bouton « Mettre à jour » de la GUI (apps/windows-gui/Updater.cs) : compare version.txt, vérifie SHA-256, remplace les fichiers après fermeture, réinstalle l'APK si casque branché.
