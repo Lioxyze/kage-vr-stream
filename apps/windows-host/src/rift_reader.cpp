@@ -64,8 +64,10 @@ void runRiftReader(const std::atomic<bool>& stop, const std::filesystem::path& d
             const ovrTrackingState ts = ovr_GetTrackingState(session, at, ovrFalse);
             ovrTrackedDeviceType objType = ovrTrackedDevice_Object0;
             ovrPoseStatef obj{};
-            const bool objOk = (ovr_GetConnectedControllerTypes(session) & ovrControllerType_Object0) &&
-                               OVR_SUCCESS(ovr_GetDevicePoses(session, &objType, 1, at, &obj));
+            // Like OculusTouchLink: query the VR object directly (the connected-types mask is not
+            // reliable for objects); a never-tracked object returns a zero timestamp.
+            const bool objOk = OVR_SUCCESS(ovr_GetDevicePoses(session, &objType, 1, at, &obj)) && obj.TimeInSeconds > 0 &&
+                               (obj.ThePose.Position.x != 0 || obj.ThePose.Position.y != 0 || obj.ThePose.Position.z != 0);
             kp::RiftPoses poses;
             const ovrPoseStatef* src[3] = {&ts.HandPoses[0], &ts.HandPoses[1], &obj};
             const unsigned flags[3] = {ts.HandStatusFlags[0], ts.HandStatusFlags[1],
