@@ -88,6 +88,13 @@ void StreamServer::recvLoop() {
         }
         // open() is only ever called from this thread; init() happens on this thread too.
         if (!session_.open({buf.data(), n}, h, body, plain)) continue;
+        if (h.channel == Channel::Audio) {  // headset microphone: u32 rate + mono int16
+            if (plain.size() > 4 && (plain.size() - 4) % 2 == 0 && onMic) {
+                const uint32_t rate = plain[0] | plain[1] << 8 | plain[2] << 16 | static_cast<uint32_t>(plain[3]) << 24;
+                onMic(rate, {reinterpret_cast<const int16_t*>(plain.data() + 4), (plain.size() - 4) / 2});
+            }
+            continue;
+        }
         auto msg = decodeMessage(plain);
         if (!msg) continue;
 

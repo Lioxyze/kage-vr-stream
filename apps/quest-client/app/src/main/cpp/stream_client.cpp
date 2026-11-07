@@ -1,5 +1,10 @@
 #include "stream_client.hpp"
 
+#include <aaudio/AAudio.h>
+
+#include <chrono>
+#include <vector>
+
 #include "kage/protocol/packet.hpp"
 #include "kage/util/log.hpp"
 #include "kage/util/time.hpp"
@@ -37,11 +42,13 @@ void StreamClient::start(const kage::net::Endpoint& driver, const kp::StreamHell
     }
     running_ = true;
     thread_ = std::thread(&StreamClient::loop, this);
+    micThread_ = std::thread(&StreamClient::micLoop, this);
 }
 
 void StreamClient::stop() {
     if (!running_.exchange(false)) return;
     if (thread_.joinable()) thread_.join();
+    if (micThread_.joinable()) micThread_.join();
     audio_.close();
     decoder_ = nullptr;
     session_.reset();
@@ -247,4 +254,71 @@ void StreamClient::loop() {
             if (haptics_.size() < 16) haptics_.push_back(*hp);
         }
     }
+}
+
+// Microphone: AAudio capture, 10 ms chunks of 48 kHz mono int16, sent sealed on the
+// Audio channel (u32 rate + samples). The stream is opened only while the user has
+// enabled it, so the mic is never recorded without their knowledge.
+void StreamClient::micLoop() {
+    AAudioStream* in = nullptr;
+    constexpr int32_t kRate = 48000, kChunk = 480;
+    std::vector<uint8_t> pkt(4 + kChunk * 2);
+    for (int i = 0; i < 4; ++i) pkt[i] = static_cast<uint8_t>(kRate >> (8 * i));
+    while (running_) {
+        const bool want = micOn_ && session_.active();
+        if (want && !in) {
+            AAudioStreamBuilder* b = nullptr;
+            if (AAudio_createStreamBuilder(&b) == AAUDIO_OK) {
+                AAudioStreamBuilder_setDirection(b, AAUDIO_DIRECTION_INPUT);
+                AAudioStreamBuilder_setSampleRate(b, kRate);
+                AAudioStreamBuilder_setChannelCount(b, 1);
+                AAudioStreamBuilder_setFormat(b, AAUDIO_FORMAT_PCM_I16);
+                AAudioStreamBuilder_setPerformanceMode(b, AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
+                AAudioStreamBuilder_setInputPreset(b, AAUDIO_INPUT_PRESET_VOICE_COMMUNICATION);
+                if (AAudioStreamBuilder_openStream(b, &in) != AAUDIO_OK || AAudioStream_requestStart(in) != AAUDIO_OK) {
+                    if (in) AAudioStream_close(in);
+                    in = nullptr;
+                    klog::warn("mic: cannot open the microphone (permission?)");
+                } else {
+                    klog::info("mic: capturing {} Hz", AAudioStream_getSampleRate(in));
+                }
+                AAudioStreamBuilder_delete(b);
+            }
+            if (!in) {
+                std::this_thread::sleep_for(std::chrono::seconds(2));
+                continue;
+            }
+        }
+        if (!want && in) {
+            AAudioStream_requestStop(in);
+            AAudioStream_close(in);
+            in = nullptr;
+            klog::info("mic: stopped");
+        }
+        micActive_ = in != nullptr;
+        if (!in) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            continue;
+        }
+        const aaudio_result_t n = AAudioStream_read(in, pkt.data() + 4, kChunk, 100'000'000);
+        if (n < 0) {  // device lost: reopen
+            AAudioStream_close(in);
+            in = nullptr;
+            continue;
+        }
+        if (n == 0) continue;
+        std::lock_guard l(sendMutex_);
+        kp::PacketHeader h;
+        h.channel = kp::Channel::Audio;
+        h.sequence = seq_[static_cast<int>(kp::Channel::Audio)]++;
+        h.sendTimeUs = monotonicMicros();
+        if (!session_.active()) continue;
+        session_.seal(h, std::span<const uint8_t>(pkt.data(), 4 + static_cast<size_t>(n) * 2), packet_);
+        sock_.sendTo(driver_, packet_);
+    }
+    if (in) {
+        AAudioStream_requestStop(in);
+        AAudioStream_close(in);
+    }
+    micActive_ = false;
 }

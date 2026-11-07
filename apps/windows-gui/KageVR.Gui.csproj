@@ -8,5 +8,9 @@
     <RootNamespace>KageVR.Gui</RootNamespace>
     <Version>0.2.0</Version>
     <InvariantGlobalization>false</InvariantGlobalization>
+    <ApplicationIcon>kage.ico</ApplicationIcon>
   </PropertyGroup>
+  <ItemGroup>
+    <Resource Include="kage.ico" />
+  </ItemGroup>
 </Project>

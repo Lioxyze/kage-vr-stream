@@ -8,6 +8,7 @@ add_library(driver_kage SHARED
     src/d3d_compositor.cpp
     src/amf_encoder.cpp
     src/audio_capture.cpp
+    src/mic_player.cpp
 )
 target_include_directories(driver_kage PRIVATE
     ${CMAKE_SOURCE_DIR}/third_party/openvr

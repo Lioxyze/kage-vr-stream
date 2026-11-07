@@ -32,6 +32,9 @@ public:
                const kage::crypto::KeyPair& identity, const kage::crypto::Key& hostKey);
     bool secured() const { return secured_; }
     void stop();
+    // Headset microphone -> PC (opt-in, off by default; only while streaming).
+    void setMic(bool on) { micOn_ = on; }
+    bool micActive() const { return micActive_; }
     bool running() const { return running_; }
 
     std::optional<kage::protocol::StreamConfig> config() const;
@@ -48,12 +51,15 @@ public:
 
 private:
     void loop();
+    void micLoop();
     void send(kage::protocol::Channel ch, const kage::protocol::Message& m);
 
     kage::net::UdpSocket sock_;
     kage::net::Endpoint driver_;
     kage::protocol::StreamHello hello_;
     std::thread thread_;
+    std::thread micThread_;
+    std::atomic<bool> micOn_{false}, micActive_{false};
     std::atomic<bool> running_{false};
     std::atomic<VideoDecoder*> decoder_{nullptr};
 

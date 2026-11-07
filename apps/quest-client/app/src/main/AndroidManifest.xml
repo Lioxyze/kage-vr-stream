@@ -10,6 +10,8 @@
     <!-- WifiLock (low-latency mode: disables Wi-Fi power save while streaming) -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- Optional headset microphone sent to the PC: asked only when the user enables it. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="org.khronos.openxr.permission.OPENXR" />
     <uses-permission android:name="org.khronos.openxr.permission.OPENXR_SYSTEM" />
     <!-- Hands shown in the lobby (optional: controllers keep working without it). -->

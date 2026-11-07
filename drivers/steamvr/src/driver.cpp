@@ -16,6 +16,7 @@
 
 #include "amf_encoder.hpp"
 #include "audio_capture.hpp"
+#include "mic_player.hpp"
 #ifdef KAGE_WITH_RIFT
 #include "rift_tracking.hpp"
 #endif
@@ -566,6 +567,8 @@ public:
         audio_.enabled = [this] { return server_.clientActive(); };
         audio_.onChunk = [this](uint32_t rate, std::span<const int16_t> pcm) { server_.sendAudio(rate, pcm); };
         audio_.start();
+        server_.onMic = [this](uint32_t rate, std::span<const int16_t> s) { mic_.push(rate, s); };
+        mic_.start(dataDir_);
 #ifdef KAGE_WITH_RIFT
         std::error_code fbEc;
         fullBody_ = std::filesystem::exists(dir / L"fullbody.enabled", fbEc);  // started from RunFrame (retries)
@@ -574,6 +577,7 @@ public:
     }
     void Cleanup() override {
         audio_.stop();
+        mic_.stop();
 #ifdef KAGE_WITH_RIFT
         rift_.stop();
 #endif
@@ -631,6 +635,7 @@ public:
 private:
     kage::driver::StreamServer server_;
     kage::driver::AudioCapture audio_;
+    kage::driver::MicPlayer mic_;
 #ifdef KAGE_WITH_RIFT
     kage::driver::RiftTracking rift_;
     bool fullBody_ = false;

@@ -66,6 +66,19 @@ std::string deviceName() {
     return __system_property_get("ro.product.model", model) > 0 ? std::string(model) : std::string("Quest");
 }
 
+// RECORD_AUDIO runtime permission (asked only once the user turned the mic on).
+bool requestMicPermission(JNIEnv* env, jobject activity) {
+    jstring perm = env->NewStringUTF("android.permission.RECORD_AUDIO");
+    jclass cls = env->GetObjectClass(activity);
+    const jint granted = env->CallIntMethod(activity, env->GetMethodID(cls, "checkSelfPermission", "(Ljava/lang/String;)I"), perm);
+    if (granted != 0) {
+        jobjectArray arr = env->NewObjectArray(1, env->FindClass("java/lang/String"), perm);
+        env->CallVoidMethod(activity, env->GetMethodID(cls, "requestPermissions", "([Ljava/lang/String;I)V"), arr, 1);
+    }
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    return true;
+}
+
 // ---------------------------------------------------------------------------
 // Background LAN discovery + connect requests (never blocks the render thread).
 class Lan {
@@ -291,7 +304,7 @@ const Button* buttonAt(const std::vector<Button>& b, float u, float v) {
 std::string ms(float v) { return v >= 0 ? std::format("{:.1f} ms", v) : std::string("Non disponible"); }
 
 enum class Mode { Lobby, Connecting, Streaming };
-enum ButtonId { kBtnHost0 = 100, kBtnRate0 = 200, kBtnQuality0 = 400, kBtnDisconnect = 300, kBtnResume = 301, kBtnRecenter = 302, kBtnCalibrate = 303 };
+enum ButtonId { kBtnHost0 = 100, kBtnRate0 = 200, kBtnQuality0 = 400, kBtnDisconnect = 300, kBtnResume = 301, kBtnRecenter = 302, kBtnCalibrate = 303, kBtnMic = 304 };
 
 // ---------------------------------------------------------------------------
 class App {
@@ -301,6 +314,8 @@ public:
     void start() {
         renderer_.init();
         qualityFile_ = dataDir_ / "quality.txt";
+        if (std::ifstream mf(dataDir_ / "mic.txt"); mf >> micOn_) {}
+        stream_.setMic(micOn_);
         if (std::ifstream qf(qualityFile_); qf >> quality_) quality_ = std::clamp(quality_, 0, static_cast<int>(std::size(kQualities)) - 1);
         else quality_ = 2;
         // App-private storage: this headset's identity key and the PCs it trusts.
@@ -565,6 +580,11 @@ private:
             buttons_.push_back({-0.26f, -top + 0.09f, 0.3f, 0.07f, "Reprendre", kBtnResume});
             buttons_.push_back({0.05f, -top + 0.09f, 0.22f, 0.07f, "Recentrer", kBtnRecenter});
             buttons_.push_back({0.0f, -top + 0.19f, 0.62f, 0.07f, "Calibrer le full body (Rift)", kBtnCalibrate});
+            buttons_.push_back({0.0f, -top + 0.29f, 0.62f, 0.07f,
+                                micOn_ ? (stream_.micActive() ? "Micro : ACTIVÉ (envoyé au PC)" : "Micro : activé (autorisation ?)")
+                                       : "Micro : désactivé",
+                                kBtnMic, true});
+            buttons_.back().selected = micOn_;
             buttons_.push_back({0.30f, -top + 0.09f, 0.24f, 0.07f, "Déconnecter", kBtnDisconnect});
         }
     }
@@ -586,6 +606,10 @@ private:
             disconnect();
         } else if (id == kBtnResume) {
             overlay_ = false;
+        } else if (id == kBtnMic) {
+            micOn_ = !micOn_;
+            std::ofstream(dataDir_ / "mic.txt", std::ios::trunc) << (micOn_ ? 1 : 0);
+            stream_.setMic(micOn_);
         } else if (id == kBtnCalibrate) {
             stream_.requestFullBodyCalibration();
             calibUntilUs_ = monotonicMicros() + 28'000'000;  // 3 s countdown + 25 s of samples
@@ -768,6 +792,12 @@ private:
     std::optional<uint32_t> pairCode_;
     int streamFps_ = 60;
     int quality_ = 2;  // Haute
+    bool micOn_ = false;  // opt-in only
+
+public:
+    bool wantsMic() const { return micOn_; }
+
+private:
     std::filesystem::path qualityFile_;
     uint64_t calibUntilUs_ = 0;
     uint64_t menuPulseUntil_ = 0;  // short press on left Menu -> SteamVR system click
@@ -798,6 +828,7 @@ void android_main(android_app* app) {
     if (xrReady) ui.start();
 
     bool finishing = !xrReady;
+    bool micAsked = false;
     while (!app->destroyRequested) {
         int timeout = (xrReady && xr.running()) ? 0 : 100;
         int events = 0;
@@ -815,6 +846,7 @@ void android_main(android_app* app) {
             ANativeActivity_finish(app->activity);
         }
         if (xr.running()) ui.frame();
+        if (ui.wantsMic() && !micAsked) micAsked = requestMicPermission(env, app->activity->clazz);
     }
     if (xrReady) ui.stop();
     xr.shutdown();

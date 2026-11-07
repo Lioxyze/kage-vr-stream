@@ -26,6 +26,7 @@ public:
     std::function<void()> onIdrRequest;
     std::function<void(const protocol::ClientStats&)> onStats;
     std::function<void()> onCalibrateFullBody;
+    std::function<void(uint32_t, std::span<const int16_t>)> onMic;  // headset microphone
 
     // dataDir holds host.key and paired.txt (shared with kage-host).
     bool start(uint16_t port, const std::filesystem::path& dataDir);
