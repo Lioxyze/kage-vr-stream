@@ -12,6 +12,7 @@
 #include <chrono>
 #include <filesystem>
 #include <format>
+#include <fstream>
 #include <map>
 #include <mutex>
 #include <string>
@@ -232,6 +233,14 @@ struct FpsMode {
     float displayHz;
 };
 constexpr FpsMode kModes[] = {{45, 90.f}, {60, 120.f}, {72, 72.f}, {90, 90.f}};
+// Quality: render resolution scale (per axis) + max bitrate. Applied at the next SteamVR start
+// (the PC keeps the resolution for the whole SteamVR session).
+struct Quality {
+    const char* name;
+    float scale;
+    uint32_t kbps;
+};
+constexpr Quality kQualities[] = {{"Basse", 0.75f, 40000}, {"Moyenne", 0.9f, 80000}, {"Haute", 1.0f, 150000}, {"Max", 1.2f, 200000}};
 
 class Panel {
 public:
@@ -282,7 +291,7 @@ const Button* buttonAt(const std::vector<Button>& b, float u, float v) {
 std::string ms(float v) { return v >= 0 ? std::format("{:.1f} ms", v) : std::string("Non disponible"); }
 
 enum class Mode { Lobby, Connecting, Streaming };
-enum ButtonId { kBtnHost0 = 100, kBtnRate0 = 200, kBtnDisconnect = 300, kBtnResume = 301, kBtnRecenter = 302, kBtnCalibrate = 303 };
+enum ButtonId { kBtnHost0 = 100, kBtnRate0 = 200, kBtnQuality0 = 400, kBtnDisconnect = 300, kBtnResume = 301, kBtnRecenter = 302, kBtnCalibrate = 303 };
 
 // ---------------------------------------------------------------------------
 class App {
@@ -291,6 +300,9 @@ public:
 
     void start() {
         renderer_.init();
+        qualityFile_ = dataDir_ / "quality.txt";
+        if (std::ifstream qf(qualityFile_); qf >> quality_) quality_ = std::clamp(quality_, 0, static_cast<int>(std::size(kQualities)) - 1);
+        else quality_ = 2;
         // App-private storage: this headset's identity key and the PCs it trusts.
         auto id = kage::crypto::loadOrCreateKeyPair(dataDir_ / "client.key");
         if (!id) {
@@ -413,6 +425,12 @@ private:
             if (xr_.eyeFovAndIpd(fov, ipd))
                 for (int i = 0; i < 2; ++i) hello.fov[i] = {fov[i].angleLeft, fov[i].angleRight, fov[i].angleUp, fov[i].angleDown};
             hello.ipdMeters = std::clamp(ipd, 0.045f, 0.085f);
+            {
+                const auto& q = kQualities[quality_];
+                hello.eyeWidth = static_cast<uint32_t>(hello.eyeWidth * q.scale) & ~15u;
+                hello.eyeHeight = static_cast<uint32_t>(hello.eyeHeight * q.scale) & ~15u;
+                hello.maxBitrateKbps = q.kbps;
+            }
             hello.codecs = kp::kCodecHEVC | kp::kCodecH264;
             hello.maxBitrateKbps = 150'000;
             stream_.start({target_.control.ipv4, reply->streamPort}, hello, identity_, res.hostKey);
@@ -538,6 +556,11 @@ private:
                                     std::format("{} i/s", kModes[i].fps), kBtnRate0 + static_cast<int>(i), true});
                 buttons_.back().selected = kModes[i].fps == streamFps_;
             }
+            for (size_t i = 0; i < std::size(kQualities) && mode_ == Mode::Lobby; ++i) {
+                buttons_.push_back({-0.30f + i * (bw + 0.02f), -top + 0.18f, bw, 0.06f, kQualities[i].name,
+                                    kBtnQuality0 + static_cast<int>(i), true});
+                buttons_.back().selected = static_cast<int>(i) == quality_;
+            }
         } else if (overlay_) {
             buttons_.push_back({-0.26f, -top + 0.09f, 0.3f, 0.07f, "Reprendre", kBtnResume});
             buttons_.push_back({0.05f, -top + 0.09f, 0.22f, 0.07f, "Recentrer", kBtnRecenter});
@@ -550,6 +573,9 @@ private:
         if (id >= kBtnHost0 && id < kBtnHost0 + 10) {
             const size_t i = static_cast<size_t>(id - kBtnHost0);
             if (i < hosts_.size()) connectTo(hosts_[i]);
+        } else if (id >= kBtnQuality0 && id < kBtnQuality0 + static_cast<int>(std::size(kQualities))) {
+            quality_ = id - kBtnQuality0;
+            std::ofstream(qualityFile_, std::ios::trunc) << quality_;
         } else if (id >= kBtnRate0 && id < kBtnRate0 + 10) {
             const size_t i = static_cast<size_t>(id - kBtnRate0);
             if (i < std::size(kModes)) setMode(kModes[i].fps);
@@ -741,6 +767,8 @@ private:
     kage::crypto::KeyPair identity_;
     std::optional<uint32_t> pairCode_;
     int streamFps_ = 60;
+    int quality_ = 2;  // Haute
+    std::filesystem::path qualityFile_;
     uint64_t calibUntilUs_ = 0;
     uint64_t menuPulseUntil_ = 0;  // short press on left Menu -> SteamVR system click
     uint64_t connectStartUs_ = 0, lostSinceUs_ = 0, menuDownAt_ = 0;

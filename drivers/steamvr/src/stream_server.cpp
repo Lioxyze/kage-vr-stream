@@ -62,7 +62,7 @@ StreamConfig StreamServer::makeConfig(const StreamHello& h) const {
     c.width = (h.eyeWidth * 2 + 15) & ~15u;
     c.height = (h.eyeHeight + 15) & ~15u;
     c.refreshHz = h.refreshHz;
-    c.bitrateKbps = std::min<uint32_t>(h.maxBitrateKbps, 150'000);
+    c.bitrateKbps = std::min<uint32_t>(h.maxBitrateKbps, 200'000);
     return c;
 }
 
