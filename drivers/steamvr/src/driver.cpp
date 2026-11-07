@@ -251,6 +251,17 @@ public:
         p->SetFloatProperty(c, vr::Prop_DisplayFrequency_Float, cfg_.refreshHz);
         // Poses are already predicted to photon time on the headset.
         p->SetFloatProperty(c, vr::Prop_SecondsFromVsyncToPhotons_Float, 0.f);
+        // Play-space universe + standing chaperone (2x2 m, hidden: the Quest guardian is the
+        // real one). Without it SteamVR has no calibrated space and tools that move it
+        // (OVR Advanced Settings: offsets, Space Drag) do nothing.
+        constexpr uint64_t kUniverse = 47800;
+        p->SetUint64Property(c, vr::Prop_CurrentUniverseId_Uint64, kUniverse);
+        p->SetBoolProperty(c, vr::Prop_DriverProvidedChaperoneVisibility_Bool, false);
+        p->SetStringProperty(c, vr::Prop_DriverProvidedChaperoneJson_String,
+                             R"({"jsonid":"chaperone_info","version":5,"universes":[{"universeID":"47800","play_area":[2.0,2.0],)"
+                             R"("collision_bounds":[[[-1,0,-1],[-1,2.4,-1],[-1,2.4,1],[-1,0,1]],[[-1,0,1],[-1,2.4,1],[1,2.4,1],[1,0,1]],)"
+                             R"([[1,0,1],[1,2.4,1],[1,2.4,-1],[1,0,-1]],[[1,0,-1],[1,2.4,-1],[-1,2.4,-1],[-1,0,-1]]],)"
+                             R"("standing":{"translation":[0,0,0],"yaw":0},"seated":{"translation":[0,0,0],"yaw":0}}]})");
         p->SetBoolProperty(c, vr::Prop_IsOnDesktop_Bool, false);
         p->SetBoolProperty(c, vr::Prop_DriverDirectModeSendsVsyncEvents_Bool, true);
         p->SetBoolProperty(c, vr::Prop_HasDriverDirectModeComponent_Bool, true);
