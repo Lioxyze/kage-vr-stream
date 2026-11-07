@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "kage/crypto/secure.hpp"
+#include "kage/net/usb_bridge.hpp"
 #include "kage/protocol/messages.hpp"
 #include "kage/session/client_link.hpp"
 #include "kage/session/host_service.hpp"
@@ -31,6 +32,24 @@
 namespace {
 
 std::atomic<bool> g_stop{false};
+
+void adbReverseLoop() {
+    wchar_t self[MAX_PATH];
+    GetModuleFileNameW(nullptr, self, MAX_PATH);
+    const auto adb = std::filesystem::path(self).parent_path() / L"adb" / L"adb.exe";
+    if (!std::filesystem::exists(adb)) return;
+    while (!g_stop) {
+        std::wstring cmd = L"\"" + adb.wstring() + L"\" reverse tcp:47810 tcp:47810";
+        STARTUPINFOW si{sizeof si};
+        PROCESS_INFORMATION pi{};
+        if (CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+            WaitForSingleObject(pi.hProcess, 4000);
+            CloseHandle(pi.hProcess);
+            CloseHandle(pi.hThread);
+        }
+        for (int i = 0; i < 25 && !g_stop; ++i) Sleep(200);
+    }
+}
 
 BOOL WINAPI onCtrl(DWORD) {
     g_stop = true;
@@ -220,10 +239,15 @@ int cmdServe(const std::vector<std::string>& a) {
     std::thread rift;
     if (std::filesystem::exists(dir / L"fullbody.enabled")) rift = std::thread([&] { kage::host::runRiftReader(g_stop, dir); });
 #endif
+    // USB cable mode: TCP bridge + `adb reverse` refreshed every 5 s (adb shipped next to the exe).
+    std::thread usb([] { kage::net::runUsbBridgeHost(g_stop); });
+    std::thread adb([] { adbReverseLoop(); });
     while (!g_stop) std::this_thread::sleep_for(std::chrono::milliseconds(200));
 #ifdef KAGE_WITH_RIFT
     if (rift.joinable()) rift.join();
 #endif
+    usb.join();
+    adb.join();
     svc.stop();
     kage::log::info("stopped. probes answered: {}, pings answered: {}, rejected packets: {}",
                     svc.counters().probesAnswered.load(), svc.counters().pingsAnswered.load(),

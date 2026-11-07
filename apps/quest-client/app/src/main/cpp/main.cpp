@@ -24,6 +24,7 @@
 #include "kage/util/time.hpp"
 #include "renderer.hpp"
 #include "stream_client.hpp"
+#include "kage/net/usb_bridge.hpp"
 #include "video_decoder.hpp"
 #include "xr_app.hpp"
 #include "xr_math.hpp"
@@ -83,10 +84,12 @@ public:
         id_ = id;
         hostsFile_ = std::move(hostsFile);
         thread_ = std::thread(&Lan::run, this);
+        usb_ = std::thread([this] { kage::net::runUsbBridgeClient(stop_, usbUp_); });
     }
     void stop() {
         stop_ = true;
         if (thread_.joinable()) thread_.join();
+        if (usb_.joinable()) usb_.join();
     }
     void cancel() { cancel_ = true; }
     std::optional<uint32_t> pairingCode() const {
@@ -138,7 +141,13 @@ private:
             }
             if (monotonicMicros() - lastProbe > 1'000'000) {
                 lastProbe = monotonicMicros();
-                if (auto h = link.discover(kage::net::Endpoint::broadcast(kp::kDefaultDiscoveryPort), name, 400)) {
+                for (int via = 0; via < 2; ++via) {
+                    if (via == 1 && !usbUp_) break;  // cable: the PC is reached through the local bridge
+                    const auto ep = via ? kage::net::Endpoint::loopback(kp::kDefaultDiscoveryPort)
+                                        : kage::net::Endpoint::broadcast(kp::kDefaultDiscoveryPort);
+                    auto h = link.discover(ep, name, 400);
+                    if (!h) continue;
+                    if (via) h->name += " (USB)";
                     auto s = link.ping(h->control, 200);
                     std::lock_guard l(m_);
                     auto& e = hosts_[h->control.ipv4];
@@ -193,7 +202,8 @@ private:
         return res;
     }
 
-    std::thread thread_;
+    std::thread thread_, usb_;
+    std::atomic<bool> usbUp_{false};
     std::atomic<bool> stop_{false}, cancel_{false};
     mutable std::mutex m_;
     std::map<uint32_t, Host> hosts_;

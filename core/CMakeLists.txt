@@ -6,6 +6,7 @@ add_library(kage_core STATIC
     src/video_fragment.cpp
     src/clock_sync.cpp
     src/udp_socket.cpp
+    src/usb_bridge.cpp
     src/log.cpp
     src/host_service.cpp
     src/client_link.cpp
