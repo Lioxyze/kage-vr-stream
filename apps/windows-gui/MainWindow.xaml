@@ -94,6 +94,18 @@
             </TabItem>
             <TabItem Header="Réglages">
                 <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="10" MaxWidth="720" HorizontalAlignment="Left">
+                    <StackPanel.Resources>
+                        <!-- Dark text: the drop-down list of a ComboBox is white -->
+                        <Style TargetType="ComboBox">
+                            <Setter Property="Foreground" Value="#111018"/>
+                            <Setter Property="FontSize" Value="13"/>
+                            <Setter Property="Padding" Value="8,5"/>
+                        </Style>
+                        <Style TargetType="ComboBoxItem">
+                            <Setter Property="Foreground" Value="#111018"/>
+                            <Setter Property="Padding" Value="8,5"/>
+                        </Style>
+                    </StackPanel.Resources>
                     <TextBlock TextWrapping="Wrap" Foreground="#B9B7C9" Margin="0,0,0,12"
                                Text="Aucune limite : tout est essayé, même sur un petit PC. Les images/s et la qualité se règlent aussi dans le casque (menu KAGÉ). Pour un PC faible : baisse la résolution dans les paramètres de SteamVR (Vidéo), choisis 45 ou 60 i/s dans le casque et H.264 ici."/>
                     <TextBlock Text="ENCODEUR VIDÉO" FontSize="11" Foreground="#8A879C"/>

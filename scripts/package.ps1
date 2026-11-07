@@ -1,5 +1,6 @@
 # Builds everything and assembles a ready-to-use folder: dist\KageVR
 #   KageVR.exe (+ .NET files)  kage-host.exe  driver\kage\  KageVR-Quest.apk  LISEZMOI.txt
+Copy-Item "$root\packaging\AGENTS.md" $out  # guide for an AI assistant troubleshooting on the user's PC
 # Usage: .\scripts\package.ps1 [-SkipBuild]
 param([switch]$SkipBuild)
 $ErrorActionPreference = 'Stop'
