@@ -231,7 +231,7 @@ public:
              std::filesystem::exists(std::wstring(local) + L"\\KageVR\\dump.request")))
             gpu_.enableDump(std::wstring(local) + L"\\KageVR\\frame.bmp");
         gpu_.setOutputSize(cfg_.width, cfg_.height);
-        bitrateKbps_ = std::min(kStartKbps, cfg_.bitrateKbps);
+        bitrateKbps_ = cfg_.bitrateKbps;  // start at the chosen quality; AIMD backs off on loss
         if (!encoder_.init(gpu_.device(), cfg_.codec == kp::kCodecHEVC, cfg_.width, cfg_.height, cfg_.refreshHz, bitrateKbps_))
             return false;
         return true;

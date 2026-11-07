@@ -59,13 +59,13 @@ bool AmfEncoder::init(ID3D11Device* device, bool hevc, uint32_t width, uint32_t 
 
     const amf_int64 bps = static_cast<amf_int64>(kbps) * 1000;
     const AMFRate rate = AMFConstructRate(static_cast<amf_uint32>(fps + 0.5f), 1);
-    // One frame of VBV: bounds the size of any single frame => bounds network burst/latency.
-    const amf_int64 vbv = static_cast<amf_int64>(bps / fps);
+    // Two frames of VBV: keyframes/detail get room (sharper), bursts stay bounded.
+    const amf_int64 vbv = static_cast<amf_int64>(2 * bps / fps);
     if (hevc) {
         AMF_TRY(encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_USAGE, AMF_VIDEO_ENCODER_HEVC_USAGE_ULTRA_LOW_LATENCY));
         // At <= 72 fps the frame budget allows the better BALANCED preset (sharper image).
         setOpt(encoder_, AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET,
-               fps <= 72.5f ? AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET_BALANCED : AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET_SPEED);
+               fps <= 72.5f ? AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET_QUALITY : AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET_BALANCED);
         AMF_TRY(encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_FRAMESIZE, AMFConstructSize(width, height)));
         setOpt(encoder_, AMF_VIDEO_ENCODER_HEVC_FRAMERATE, rate);
         setOpt(encoder_, AMF_VIDEO_ENCODER_HEVC_LOWLATENCY_MODE, true);
@@ -83,7 +83,7 @@ bool AmfEncoder::init(ID3D11Device* device, bool hevc, uint32_t width, uint32_t 
     } else {
         AMF_TRY(encoder_->SetProperty(AMF_VIDEO_ENCODER_USAGE, AMF_VIDEO_ENCODER_USAGE_ULTRA_LOW_LATENCY));
         setOpt(encoder_, AMF_VIDEO_ENCODER_QUALITY_PRESET,
-               fps <= 72.5f ? AMF_VIDEO_ENCODER_QUALITY_PRESET_BALANCED : AMF_VIDEO_ENCODER_QUALITY_PRESET_SPEED);
+               fps <= 72.5f ? AMF_VIDEO_ENCODER_QUALITY_PRESET_QUALITY : AMF_VIDEO_ENCODER_QUALITY_PRESET_BALANCED);
         AMF_TRY(encoder_->SetProperty(AMF_VIDEO_ENCODER_FRAMESIZE, AMFConstructSize(width, height)));
         setOpt(encoder_, AMF_VIDEO_ENCODER_FRAMERATE, rate);
         setOpt(encoder_, AMF_VIDEO_ENCODER_LOWLATENCY_MODE, true);
@@ -173,11 +173,11 @@ void AmfEncoder::setBitrate(uint32_t kbps) {
     if (hevc_) {
         encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_TARGET_BITRATE, bps);
         encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_PEAK_BITRATE, bps);
-        encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_VBV_BUFFER_SIZE, static_cast<amf_int64>(bps / fps_));
+        encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_VBV_BUFFER_SIZE, static_cast<amf_int64>(2 * bps / fps_));
     } else {
         encoder_->SetProperty(AMF_VIDEO_ENCODER_TARGET_BITRATE, bps);
         encoder_->SetProperty(AMF_VIDEO_ENCODER_PEAK_BITRATE, bps);
-        encoder_->SetProperty(AMF_VIDEO_ENCODER_VBV_BUFFER_SIZE, static_cast<amf_int64>(bps / fps_));
+        encoder_->SetProperty(AMF_VIDEO_ENCODER_VBV_BUFFER_SIZE, static_cast<amf_int64>(2 * bps / fps_));
     }
 }
 
