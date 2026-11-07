@@ -46,6 +46,11 @@ public:
     // Requests larger kernel buffers (best effort); useful for video bursts.
     void setBufferSizes(int sendBytes, int recvBytes);
 
+    // Wi-Fi priority (WMM video queue) for traffic to `to`: fewer latency spikes on a busy
+    // Wi-Fi. Windows: qWAVE AudioVideo flow (DSCP 40, no admin). Android: IP_TOS.
+    // Best effort: false when the OS refuses (traffic still flows normally).
+    bool setLowLatencyPriority(const Endpoint& to);
+
     static std::string lastErrorString();
 
 private:

@@ -12,7 +12,9 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <mstcpip.h>
+#include <qos2.h>
 #pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "qwave.lib")
 #ifndef SIO_UDP_CONNRESET
 #define SIO_UDP_CONNRESET _WSAIOW(IOC_VENDOR, 12)
 #endif
@@ -184,6 +186,33 @@ std::string UdpSocket::lastErrorString() {
     return std::format("WSA error {}", WSAGetLastError());
 #else
     return std::format("errno {} ({})", errno, std::strerror(errno));
+#endif
+}
+
+}  // namespace kage::net
+
+namespace kage::net {
+
+bool UdpSocket::setLowLatencyPriority(const Endpoint& to) {
+    if (handle_ == kInvalid) return false;
+    if ((to.ipv4 >> 24) == 127) return true;  // loopback (USB bridge): nothing to prioritise
+#ifdef _WIN32
+    sockaddr_in a{};
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(to.ipv4);
+    a.sin_port = htons(to.port);
+    static HANDLE qos = [] {
+        QOS_VERSION v{1, 0};
+        HANDLE h = nullptr;
+        return QOSCreateHandle(&v, &h) ? h : nullptr;
+    }();
+    if (!qos) return false;
+    QOS_FLOWID flow = 0;
+    return QOSAddSocketToFlow(qos, static_cast<SOCKET>(handle_), reinterpret_cast<sockaddr*>(&a),
+                              QOSTrafficTypeAudioVideo, QOS_NON_ADAPTIVE_FLOW, &flow) != FALSE;
+#else
+    const int tos = 0xB8;  // DSCP EF -> WMM video access category on the Wi-Fi uplink
+    return setsockopt(handle_, IPPROTO_IP, IP_TOS, &tos, sizeof tos) == 0;
 #endif
 }
 

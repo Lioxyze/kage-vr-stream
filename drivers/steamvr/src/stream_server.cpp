@@ -170,7 +170,8 @@ void StreamServer::handleSecureHello(const SecureHello& sh, const net::Endpoint&
         sessionEph_ = sh.clientEphemeral;
         std::lock_guard l(mutex_);
         client_ = from;
-        log::info("stream: encrypted session with {} established", from.toString());
+        log::info("stream: encrypted session with {} established, Wi-Fi priority {}", from.toString(),
+                  sock_.setLowLatencyPriority(from) ? "on" : "unavailable");
     }
     encodeMessage(lastAccept_, payload);
     PacketHeader h;

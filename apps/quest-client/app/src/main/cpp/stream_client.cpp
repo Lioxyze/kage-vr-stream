@@ -34,6 +34,7 @@ void StreamClient::start(const kage::net::Endpoint& driver, const kp::StreamHell
     sock_ = std::move(*s);
     sock_.setBufferSizes(256 * 1024, 4 * 1024 * 1024);  // absorb a full frame burst
     driver_ = driver;
+    if (!sock_.setLowLatencyPriority(driver)) klog::warn("stream: Wi-Fi priority unavailable");
     hello_ = hello;
     {
         std::lock_guard l(mutex_);
