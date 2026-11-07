@@ -224,10 +224,12 @@ public:
     bool initGraphics() {
         if (!gpu_.init()) return false;
         wchar_t dumpEnv[8];
-        if (GetEnvironmentVariableW(L"KAGE_DUMP_FRAME", dumpEnv, 8)) {
-            wchar_t local[MAX_PATH];
-            if (GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH)) gpu_.enableDump(std::wstring(local) + L"\\KageVR\\frame.bmp");
-        }
+        wchar_t local[MAX_PATH];
+        // Debug capture: env var, or a "dump.request" file in the data folder.
+        if (GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH) &&
+            (GetEnvironmentVariableW(L"KAGE_DUMP_FRAME", dumpEnv, 8) ||
+             std::filesystem::exists(std::wstring(local) + L"\\KageVR\\dump.request")))
+            gpu_.enableDump(std::wstring(local) + L"\\KageVR\\frame.bmp");
         gpu_.setOutputSize(cfg_.width, cfg_.height);
         bitrateKbps_ = std::min(kStartKbps, cfg_.bitrateKbps);
         if (!encoder_.init(gpu_.device(), cfg_.codec == kp::kCodecHEVC, cfg_.width, cfg_.height, cfg_.refreshHz, bitrateKbps_))
