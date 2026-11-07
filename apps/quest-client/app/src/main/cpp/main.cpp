@@ -66,6 +66,31 @@ std::string deviceName() {
     return __system_property_get("ro.product.model", model) > 0 ? std::string(model) : std::string("Quest");
 }
 
+// Volume keys: an immersive NativeActivity does not get the system volume handling, so
+// adjust the media volume ourselves (with the system volume UI).
+JNIEnv* g_env = nullptr;
+jobject g_activity = nullptr;
+int32_t onInput(android_app*, AInputEvent* e) {
+    if (AInputEvent_getType(e) != AINPUT_EVENT_TYPE_KEY) return 0;
+    const int32_t code = AKeyEvent_getKeyCode(e);
+    if (code != AKEYCODE_VOLUME_UP && code != AKEYCODE_VOLUME_DOWN && code != AKEYCODE_VOLUME_MUTE) return 0;
+    if (AKeyEvent_getAction(e) == AKEY_EVENT_ACTION_DOWN && g_env && g_activity) {
+        JNIEnv* env = g_env;
+        jclass ctx = env->FindClass("android/content/Context");
+        jstring svc = env->NewStringUTF("audio");
+        jobject am = env->CallObjectMethod(g_activity, env->GetMethodID(ctx, "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;"), svc);
+        if (am) {
+            const jint dir = code == AKEYCODE_VOLUME_UP ? 1 : code == AKEYCODE_VOLUME_DOWN ? -1 : 101;  // ADJUST_RAISE/LOWER/TOGGLE_MUTE
+            env->CallVoidMethod(am, env->GetMethodID(env->GetObjectClass(am), "adjustStreamVolume", "(III)V"), 3 /* STREAM_MUSIC */, dir,
+                                1 /* FLAG_SHOW_UI */);
+            env->DeleteLocalRef(am);
+        }
+        env->DeleteLocalRef(svc);
+        if (env->ExceptionCheck()) env->ExceptionClear();
+    }
+    return 1;
+}
+
 // RECORD_AUDIO runtime permission (asked only once the user turned the mic on).
 bool requestMicPermission(JNIEnv* env, jobject activity) {
     jstring perm = env->NewStringUTF("android.permission.RECORD_AUDIO");
@@ -828,6 +853,9 @@ void android_main(android_app* app) {
     if (xrReady) ui.start();
 
     bool finishing = !xrReady;
+    g_env = env;
+    g_activity = app->activity->clazz;
+    app->onInputEvent = onInput;
     bool micAsked = false;
     while (!app->destroyRequested) {
         int timeout = (xrReady && xr.running()) ? 0 : 100;
