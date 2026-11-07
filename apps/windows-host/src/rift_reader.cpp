@@ -9,6 +9,9 @@
 #include <OVR_CAPI.h>
 
 #include <array>
+#include <cstdio>
+#include <cstdlib>
+#include <format>
 #include <cstring>
 #include <fstream>
 #include <string>
@@ -62,13 +65,32 @@ void runRiftReader(const std::atomic<bool>& stop, const std::filesystem::path& d
             if (OVR_FAILURE(ovr_GetSessionStatus(session, &ss)) || ss.ShouldQuit || !ss.HmdPresent) break;
             const double at = ovr_GetTimeInSeconds() + predictS;
             const ovrTrackingState ts = ovr_GetTrackingState(session, at, ovrFalse);
-            ovrTrackedDeviceType objType = ovrTrackedDevice_Object0;
+            // Like OculusTouchLink: query the VR objects directly (the connected-types mask is
+            // not reliable for objects). Take the first of Object0..3 that is being tracked.
             ovrPoseStatef obj{};
-            // Like OculusTouchLink: query the VR object directly (the connected-types mask is not
-            // reliable for objects); a never-tracked object returns a zero timestamp.
-            const bool objOk = OVR_SUCCESS(ovr_GetDevicePoses(session, &objType, 1, at, &obj)) && obj.TimeInSeconds > 0 &&
-                               (obj.ThePose.Position.x != 0 || obj.ThePose.Position.y != 0 || obj.ThePose.Position.z != 0);
-            kp::RiftPoses poses;
+            bool objOk = false;
+            for (int k = 0; k < 4 && !objOk; ++k) {
+                auto type = static_cast<ovrTrackedDeviceType>(ovrTrackedDevice_Object0 << k);
+                objOk = OVR_SUCCESS(ovr_GetDevicePoses(session, &type, 1, at, &obj)) && obj.TimeInSeconds > 0 &&
+                        (obj.ThePose.Position.x != 0 || obj.ThePose.Position.y != 0 || obj.ThePose.Position.z != 0);
+            }
+            if (static bool dbg = std::getenv("KAGE_RIFT_DEBUG") != nullptr; dbg) {  // diagnostics
+                static double lastDbg = 0;
+                if (at - lastDbg > 2) {
+                    lastDbg = at;
+                    std::string s = std::format("types=0x{:x} hands={:x}/{:x}", ovr_GetConnectedControllerTypes(session),
+                                                ts.HandStatusFlags[0], ts.HandStatusFlags[1]);
+                    for (int k = 0; k < 4; ++k) {
+                        auto type = static_cast<ovrTrackedDeviceType>(ovrTrackedDevice_Object0 << k);
+                        ovrPoseStatef o{};
+                        const ovrResult r = ovr_GetDevicePoses(session, &type, 1, at, &o);
+                        s += std::format(" obj{}: r={} t={:.2f} p=({:.2f},{:.2f},{:.2f})", k, r, o.TimeInSeconds, o.ThePose.Position.x,
+                                         o.ThePose.Position.y, o.ThePose.Position.z);
+                    }
+                    std::printf("%s\n", s.c_str());
+                    std::fflush(stdout);
+                }
+            }            kp::RiftPoses poses;
             const ovrPoseStatef* src[3] = {&ts.HandPoses[0], &ts.HandPoses[1], &obj};
             const unsigned flags[3] = {ts.HandStatusFlags[0], ts.HandStatusFlags[1],
                                        objOk ? static_cast<unsigned>(ovrStatus_PositionTracked | ovrStatus_OrientationTracked) : 0u};
