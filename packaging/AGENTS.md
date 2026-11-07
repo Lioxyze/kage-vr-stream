@@ -50,8 +50,7 @@ n'est pas développeur. N'invente jamais de résultat : vérifie (journaux, comm
 - **« Not loading driver kage because it is disabled »** : dans `steamvr.vrsettings`, `driver_kage.enable = true`.
 - **Le casque ne voit pas le PC** : KageVR.exe ouvert ? même réseau ? autoriser `kage-host` sur les
   réseaux **privés** si Windows le demande (ne rien ouvrir d'autre).
-- **Pas de son** : volume du casque (boutons du casque). **Micro** : installer VB-CABLE (vb-audio.com,
-  avec accord), bouton « Micro » dans le menu KAGÉ du casque (appui long sur Menu) ; micro Windows = « CABLE Output ».
+- **Pas de son** : volume du casque (boutons du casque). **Micro** : installer VB-CABLE avec Installer-Micro-VBCABLE.bat (avec accord ; détails dans MICRO-LISEZMOI.txt), bouton « Micro » dans le menu KAGÉ du casque (appui long sur Menu) ; micro Windows = « CABLE Output ».
 - **Boutons de volume du casque** : gérés par l'app KAGÉ (volume média).
 
 ## Diagnostic rapide (PowerShell)

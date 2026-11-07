@@ -20,6 +20,7 @@ Copy-Item "$root\build\apps\windows-host\Release\kage-host.exe" $out
 Copy-Item "$root\build\driver\kage" "$out\driver\kage" -Recurse
 Copy-Item "$root\apps\quest-client\app\build\outputs\apk\debug\app-debug.apk" "$out\KageVR-Quest.apk"
 Copy-Item "$root\packaging\AGENTS.md" $out  # guide for an AI assistant troubleshooting on the user's PC
+Copy-Item "$root\packaging\Installer-Micro-VBCABLE.bat","$root\packaging\MICRO-LISEZMOI.txt" $out
 # USB cable mode: adb (Android platform-tools, Apache 2.0) for `adb reverse`.
 $pt = "$env:LOCALAPPDATA\Android\Sdk\platform-tools"
 if (Test-Path "$pt\adb.exe") { New-Item -ItemType Directory -Force "$out\adb" | Out-Null; Copy-Item "$pt\adb.exe","$pt\AdbWinApi.dll","$pt\AdbWinUsbApi.dll" "$out\adb" }

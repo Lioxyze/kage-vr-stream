@@ -1,0 +1,28 @@
+﻿MICRO DU CASQUE -> PC (pour VRChat, Discord...)
+
+Le casque envoie sa voix au PC (chiffree). Pour qu'elle apparaisse comme un micro dans Windows,
+il faut un "cable audio virtuel" : VB-CABLE (gratuit, de VB-Audio, signe).
+
+INSTALLATION (une seule fois)
+  Option A (automatique) : double-cliquer sur Installer-Micro-VBCABLE.bat
+                           (telecharge depuis vb-audio.com, verifie la signature, lance l'installation)
+  Option B (a la main)   : https://vb-audio.com/Cable/  -> telecharger "VBCABLE_Driver_Pack45.zip",
+                           extraire, clic droit sur VBCABLE_Setup_x64.exe -> Executer en tant qu'administrateur
+  Puis : cliquer "Install Driver" et REDEMARRER le PC.
+
+UTILISATION
+  1. Lancer KageVR sur le PC, se connecter avec le casque.
+  2. Dans le casque : appui long sur le bouton Menu (manette gauche) -> menu KAGE
+     -> bouton "Micro : desactive" pour l'activer. La 1re fois, accepter l'autorisation du micro.
+     Le bouton doit afficher "Micro : ACTIVE (envoye au PC)".
+  3. Dans le jeu / Discord / Voicemeeter : choisir le micro "CABLE Output (VB-Audio Virtual Cable)".
+     (On peut le renommer : Parametres Windows > Systeme > Son > Entree > CABLE Output > Renommer,
+      par ex. "Quest micro".)
+
+SI ON N'ENTEND RIEN
+  - Le bouton Micro du casque est bien sur ACTIVE ?
+  - Dans Parametres Windows > Son > Entree, le niveau de "CABLE Output" bouge quand on parle ?
+  - Journal : %LOCALAPPDATA%\KageVR\driver.log doit contenir "mic: headset microphone -> CABLE Input".
+  - Autre sortie que VB-CABLE : ecrire une partie de son nom dans %LOCALAPPDATA%\KageVR\mic_device.txt
+    (ex. "Voicemeeter AUX Input").
+  Le micro est coupe par defaut et n'est jamais enregistre : il est seulement transmis au PC.
