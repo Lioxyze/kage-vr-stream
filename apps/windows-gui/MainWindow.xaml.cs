@@ -35,6 +35,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        LoadSettingsUi();
         foreach (var (key, label) in MetricDefs)
         {
             var value = new TextBlock { Text = "Non disponible", FontSize = 22, FontWeight = FontWeights.SemiBold, Foreground = (Brush)FindResource("Cyan") };

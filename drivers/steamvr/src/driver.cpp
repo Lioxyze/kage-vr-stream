@@ -15,6 +15,8 @@
 #include <thread>
 
 #include "amf_encoder.hpp"
+#include "mf_encoder.hpp"
+#include "settings.hpp"
 #include "audio_capture.hpp"
 #include "mic_player.hpp"
 #ifdef KAGE_WITH_RIFT
@@ -233,9 +235,24 @@ public:
             gpu_.enableDump(std::wstring(local) + L"\\KageVR\\frame.bmp");
         gpu_.setOutputSize(cfg_.width, cfg_.height);
         bitrateKbps_ = cfg_.bitrateKbps;  // start at the chosen quality; AIMD backs off on loss
-        if (!encoder_.init(gpu_.device(), cfg_.codec == kp::kCodecHEVC, cfg_.width, cfg_.height, cfg_.refreshHz, bitrateKbps_))
-            return false;
-        return true;
+        // Encoder: settings.ini "encoder" = auto (AMD AMF, then the GPU vendor through Media
+        // Foundation: NVIDIA / Intel / AMD, then software), amf, gpu or software.
+        const auto st = kage::driver::loadSettings();
+        const bool hevc = cfg_.codec == kp::kCodecHEVC;
+        std::vector<std::unique_ptr<kage::driver::VideoEncoder>> order;
+        if (st.encoder == "auto" || st.encoder == "amf") order.push_back(std::make_unique<kage::driver::AmfEncoder>());
+        if (st.encoder == "auto" || st.encoder == "gpu") order.push_back(std::make_unique<kage::driver::MfEncoder>(true, false));
+        if (st.encoder == "auto" || st.encoder == "software") order.push_back(std::make_unique<kage::driver::MfEncoder>(false, true));
+        for (auto& e : order) {
+            if (e->init(gpu_.device(), hevc, cfg_.width, cfg_.height, cfg_.refreshHz, bitrateKbps_)) {
+                encoder_ = std::move(e);
+                klog::info("encoder: {}", encoder_->name());
+                return true;
+            }
+            e->shutdown();
+        }
+        klog::error("encoder: none available for {} (try H.264 in the KageVR settings)", hevc ? "HEVC" : "H.264");
+        return false;
     }
 
     vr::EVRInitError Activate(uint32_t id) override {
@@ -278,7 +295,7 @@ public:
         running_ = false;
         if (vsync_.joinable()) vsync_.join();
         if (encodeOut_.joinable()) encodeOut_.join();
-        encoder_.shutdown();
+        if (encoder_) encoder_->shutdown();
         id_ = vr::k_unTrackedDeviceIndexInvalid;
     }
     void EnterStandby() override {}
@@ -419,7 +436,7 @@ public:
         if (!tex) return;
         ++composed_;
         if (const uint32_t br = pendingBitrate_.exchange(0)) {  // applied on the encode thread
-            encoder_.setBitrate(br);
+            encoder_->setBitrate(br);
             net_.setPacingKbps(br);
         }
         const uint64_t index = frameIndex_++;
@@ -427,7 +444,7 @@ public:
             std::lock_guard l(metaMutex_);
             metas_[index % kMetaRing] = meta;
         }
-        const bool ok = encoder_.submit(tex, index, idr_.exchange(false) || index == 0);
+        const bool ok = encoder_->submit(tex, index, idr_.exchange(false) || index == 0);
         if (n <= 3) klog::info("Present #{}: submitted={}", n, ok);
         if (ok) ++submitted_;
     }
@@ -495,7 +512,7 @@ private:
         uint64_t frames = 0, bytes = 0, encUsSum = 0;
         uint64_t lastLog = kage::monotonicMicros();
         while (running_) {
-            auto f = encoder_.poll();
+            auto f = encoder_->poll();
             if (!f) continue;
             const uint64_t now = kage::monotonicMicros();
             kp::VideoFrameMeta meta;
@@ -523,7 +540,7 @@ private:
     kp::StreamHello hello_;
     kp::StreamConfig cfg_;
     kage::driver::D3DCompositor gpu_;
-    kage::driver::AmfEncoder encoder_;
+    std::unique_ptr<kage::driver::VideoEncoder> encoder_;
     uint32_t id_ = vr::k_unTrackedDeviceIndexInvalid;
     std::mutex poseMutex_;
     vr::DriverPose_t pose_ = makePose({}, false, true);

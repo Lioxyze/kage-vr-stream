@@ -1,4 +1,5 @@
 #include "stream_server.hpp"
+#include "settings.hpp"
 
 #include <algorithm>
 #include <array>
@@ -57,12 +58,14 @@ bool StreamServer::clientActive() const {
 
 StreamConfig StreamServer::makeConfig(const StreamHello& h) const {
     StreamConfig c;
-    c.codec = (h.codecs & kCodecHEVC) ? kCodecHEVC : kCodecH264;
+    const auto st = kage::driver::loadSettings();
+    const bool wantH264 = st.codec == "h264" || !(h.codecs & kCodecHEVC);
+    c.codec = wantH264 && (h.codecs & kCodecH264) ? kCodecH264 : kCodecHEVC;
     // Encoders need even dimensions; 16-aligned avoids padding/cropping work in the encoder.
     c.width = (h.eyeWidth * 2 + 15) & ~15u;
     c.height = (h.eyeHeight + 15) & ~15u;
     c.refreshHz = h.refreshHz;
-    c.bitrateKbps = std::min<uint32_t>(h.maxBitrateKbps, 200'000);
+    c.bitrateKbps = st.maxBitrateKbps ? st.maxBitrateKbps : h.maxBitrateKbps;  // no cap: user choice
     return c;
 }
 

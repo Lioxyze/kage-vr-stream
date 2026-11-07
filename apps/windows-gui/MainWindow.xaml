@@ -92,6 +92,29 @@
                                Text="Calibration : casque Quest sur la tête et SteamVR lancé, colle la manette DROITE du Rift contre la manette DROITE du Quest (bien serrées dans la main), clique « Calibrer », puis fais-les tourner dans tous les sens pendant 15 s. À refaire seulement si les capteurs du Rift ou la zone de jeu du Quest changent."/>
                 </StackPanel></ScrollViewer>
             </TabItem>
+            <TabItem Header="Réglages">
+                <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="10" MaxWidth="720" HorizontalAlignment="Left">
+                    <TextBlock TextWrapping="Wrap" Foreground="#B9B7C9" Margin="0,0,0,12"
+                               Text="Aucune limite : tout est essayé, même sur un petit PC. Les images/s et la qualité se règlent aussi dans le casque (menu KAGÉ). Pour un PC faible : baisse la résolution dans les paramètres de SteamVR (Vidéo), choisis 45 ou 60 i/s dans le casque et H.264 ici."/>
+                    <TextBlock Text="ENCODEUR VIDÉO" FontSize="11" Foreground="#8A879C"/>
+                    <ComboBox x:Name="EncoderBox" Margin="0,4,0,12" SelectedIndex="0">
+                        <ComboBoxItem Content="Automatique (AMD, puis NVIDIA / Intel / AMD via Windows, puis processeur)"/>
+                        <ComboBoxItem Content="AMD uniquement (AMF)"/>
+                        <ComboBoxItem Content="Carte graphique via Windows (NVIDIA, Intel, AMD, graphique intégré)"/>
+                        <ComboBoxItem Content="Processeur (logiciel, H.264, lent)"/>
+                    </ComboBox>
+                    <TextBlock Text="CODEC" FontSize="11" Foreground="#8A879C"/>
+                    <ComboBox x:Name="CodecBox" Margin="0,4,0,12" SelectedIndex="0">
+                        <ComboBoxItem Content="Automatique (HEVC : meilleure image)"/>
+                        <ComboBoxItem Content="H.264 (plus compatible : vieux PC, graphique intégré Intel)"/>
+                    </ComboBox>
+                    <TextBlock x:Name="BitrateLabel" Text="Débit max" FontSize="13" Foreground="#ECEBF4"/>
+                    <Slider x:Name="BitrateSlider" Minimum="0" Maximum="400" TickFrequency="5" IsSnapToTickEnabled="True"
+                            Margin="0,4,0,12" ValueChanged="OnBitrateChanged"/>
+                    <Button Style="{StaticResource Primary}" Content="Enregistrer" Click="OnSaveSettings" HorizontalAlignment="Left"/>
+                    <TextBlock x:Name="SettingsStatus" TextWrapping="Wrap" Foreground="#5CE1E6" Margin="0,8,0,0"/>
+                </StackPanel></ScrollViewer>
+            </TabItem>
             <TabItem Header="Diagnostic">
                 <TextBox x:Name="DiagnosticText" IsReadOnly="True" FontFamily="Cascadia Mono, Consolas" FontSize="12.5"
                          Background="#0F0E15" Foreground="#ECEBF4" BorderThickness="0" Padding="10"

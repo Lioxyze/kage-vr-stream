@@ -3,11 +3,7 @@
 // performs the RGB->NV12 conversion itself).
 #pragma once
 
-#include <d3d11.h>
-
-#include <cstdint>
-#include <optional>
-#include <vector>
+#include "video_encoder.hpp"
 
 namespace amf {
 class AMFFactory;
@@ -17,24 +13,18 @@ class AMFComponent;
 
 namespace kage::driver {
 
-struct EncodedFrame {
-    uint64_t frameIndex = 0;
-    bool keyframe = false;
-    uint64_t submitUs = 0;
-    std::vector<uint8_t> data;
-};
-
-class AmfEncoder {
+class AmfEncoder final : public VideoEncoder {
 public:
-    ~AmfEncoder();
-    bool init(ID3D11Device* device, bool hevc, uint32_t width, uint32_t height, float fps, uint32_t bitrateKbps);
-    void shutdown();
+    ~AmfEncoder() override;
+    bool init(ID3D11Device* device, bool hevc, uint32_t width, uint32_t height, float fps, uint32_t bitrateKbps) override;
+    void shutdown() override;
+    const char* name() const override { return "AMD AMF"; }
 
     // Non-blocking: queues the texture for encoding. The texture must stay untouched until its frame is output.
-    bool submit(ID3D11Texture2D* tex, uint64_t frameIndex, bool forceIdr);
+    bool submit(ID3D11Texture2D* tex, uint64_t frameIndex, bool forceIdr) override;
     // Waits up to the configured query timeout (~10 ms) for an output.
-    std::optional<EncodedFrame> poll();
-    void setBitrate(uint32_t kbps);
+    std::optional<EncodedFrame> poll() override;
+    void setBitrate(uint32_t kbps) override;
 
 private:
     void* dll_ = nullptr;

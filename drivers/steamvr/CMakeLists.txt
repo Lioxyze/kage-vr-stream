@@ -7,13 +7,14 @@ add_library(driver_kage SHARED
     src/stream_server.cpp
     src/d3d_compositor.cpp
     src/amf_encoder.cpp
+    src/mf_encoder.cpp
     src/audio_capture.cpp
     src/mic_player.cpp
 )
 target_include_directories(driver_kage PRIVATE
     ${CMAKE_SOURCE_DIR}/third_party/openvr
     ${CMAKE_SOURCE_DIR}/third_party/amf/include)
-target_link_libraries(driver_kage PRIVATE kage::core d3d11 dxgi d3dcompiler ole32)
+target_link_libraries(driver_kage PRIVATE kage::core d3d11 dxgi d3dcompiler ole32 mfplat mfuuid mf strmiids)
 target_compile_options(driver_kage PRIVATE /W3 /permissive- /utf-8)
 
 set(KAGE_DRIVER_DIR ${CMAKE_BINARY_DIR}/driver/kage)
