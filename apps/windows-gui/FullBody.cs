@@ -48,7 +48,10 @@ public partial class MainWindow
         Directory.CreateDirectory(_dataDir);
         if (FullBodyCheck.IsChecked == true) File.WriteAllText(FullBodyFlag, "1");
         else File.Delete(FullBodyFlag);
-        Log(FullBodyCheck.IsChecked == true ? "Full body activé (relancer SteamVR)." : "Full body désactivé (relancer SteamVR).");
+        // kage-host starts/stops its Rift reader at launch: restart it to apply.
+        StopService();
+        StartService();
+        Log(FullBodyCheck.IsChecked == true ? "Full body activé : lecture du Rift lancée. Relancer SteamVR pour voir les trackers." : "Full body désactivé (relancer SteamVR).");
     }
 
     private void OnCalibrate(object s, RoutedEventArgs e)
