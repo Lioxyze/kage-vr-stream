@@ -23,3 +23,6 @@ if(WIN32)
     add_test(NAME test_stream_e2e COMMAND test_stream_e2e)
     set_tests_properties(test_stream_e2e PROPERTIES LABELS integration TIMEOUT 60)
 endif()
+
+kage_add_test(test_bitrate)
+target_include_directories(test_bitrate PRIVATE ${CMAKE_SOURCE_DIR}/drivers/steamvr/src)

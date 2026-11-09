@@ -15,6 +15,7 @@
 #include <thread>
 
 #include "amf_encoder.hpp"
+#include "bitrate_controller.hpp"
 #include "mf_encoder.hpp"
 #include "settings.hpp"
 #include "audio_capture.hpp"
@@ -345,51 +346,29 @@ public:
     void onProbe(uint32_t kbps) {
         const uint32_t br = probeStart(cfg_.bitrateKbps, kbps);
         klog::info("bitrate: Wi-Fi start {} Mbit/s (measured {}, quality max {})", br / 1000, kbps / 1000, cfg_.bitrateKbps / 1000);
-        bitrateKbps_ = br;  // AIMD state is read on the network thread only, like onStats
+        rate().set(br, kage::monotonicMicros());  // no probing up for 2 s (network thread, like onStats)
+        bitrateKbps_ = br;
         pendingBitrate_ = br;
-        holdUntilUs_ = kage::monotonicMicros() + 2'000'000;  // no probing up right after
     }
 
-    // Deterministic AIMD bitrate control from the headset's 1 Hz report.
-    // Congestion = lost frames, fewer frames than the refresh rate, or one-way transit
-    // rising 8 ms above the best seen. Back off 25 %, then probe up 5 % per calm second.
+    // Bitrate control from the headset's reports: see bitrate_controller.hpp (AIMD, unit-tested,
+    // replayable on driver.log with kage-bitrate-replay).
+    kage::driver::BitrateController& rate() {
+        if (!rate_) rate_.emplace(cfg_.bitrateKbps, bitrateKbps_);
+        return *rate_;
+    }
     void onStats(const kp::ClientStats& s) {
         const uint32_t net = s.networkUsAvg;
         // Compare with frames actually sent: a slow SteamVR frame rate is not network congestion.
         const uint64_t enc = encoded_.load();
         const uint32_t sentDelta = static_cast<uint32_t>(enc - lastEncoded_);
         lastEncoded_ = enc;
-        // Reports come every 250 ms (new headsets) or 1 s (old ones): every rule uses the
-        // real interval, so both behave the same per second.
         const uint64_t now = kage::monotonicMicros();
-        const uint64_t dt = lastReportUs_ ? std::clamp<uint64_t>(now - lastReportUs_, 100'000, 2'000'000) : 1'000'000;
+        const double dts = lastReportUs_ ? std::clamp((now - lastReportUs_) / 1e6, 0.1, 2.0) : 1.0;
         lastReportUs_ = now;
-        if (!firstReportUs_) firstReportUs_ = now;
-        const double dts = dt / 1e6;
-        // Baseline = lowest transit seen (0 = no frame in that report: ignored).
-        if (net && (bestNetUs_ == 0 || net < bestNetUs_)) bestNetUs_ = net;
-        if (bestNetUs_) bestNetUs_ += static_cast<uint32_t>(50 * dts);  // slowly forget an old optimum
-        // Wi-Fi has isolated latency spikes unrelated to our rate: a mild delay must last 2 s.
-        delayUs_ = (net && bestNetUs_ && net > bestNetUs_ + 10000) ? delayUs_ + dt : 0;
-        // A large queueing delay (> 25 ms over the best) is acted on at once: the Wi-Fi queue
-        // only drains if we send less.
-        const bool bigDelay = net && bestNetUs_ && net > bestNetUs_ + 25000;
-        const bool loss = s.framesDropped > 0 || s.framesReceived + std::max(2.0, 5 * dts) < sentDelta;
-        const bool congested = loss || delayUs_ >= 2'000'000 || bigDelay;
-        uint32_t br = bitrateKbps_;
-        if (now - firstReportUs_ < 5'000'000) {
-            // SteamVR start-up (shader compiles, dashboard loading) causes transient stalls: ignore.
-        } else if (congested) {
-            // At most one cut per 400 ms: the effect of a cut needs a moment to show.
-            if (now - lastCutUs_ >= 400'000) {
-                const uint32_t floor = loss ? kMinKbps : std::min(kDelayFloorKbps, br);
-                br = std::max<uint32_t>(floor, br * 3 / 4);
-                lastCutUs_ = now;
-            }
-            holdUntilUs_ = now + 2'000'000;  // hold 2 s before probing again
-        } else if (now >= holdUntilUs_) {
-            br = std::min<uint32_t>(cfg_.bitrateKbps, br + static_cast<uint32_t>(br * 0.10 * dts));  // +10 %/s
-        }
+        const uint32_t br = rate().update({now, s.framesReceived, s.framesDropped, sentDelta, net});
+        const bool congested = rate_->lastCongested();
+        bestNetUs_ = rate_->bestNetUs();
         if (br != bitrateKbps_) {
             bitrateKbps_ = br;
             pendingBitrate_ = br;
@@ -515,13 +494,11 @@ private:
     std::atomic<uint32_t> predictionUs_{0};  // how far ahead the headset predicts (GUI)
 
     static constexpr size_t kMetaRing = 16;
-    static constexpr uint32_t kMinKbps = 10'000, kStartKbps = 60'000;
-    // Delay alone (no lost frame) never pushes below this: on a jittery Wi-Fi the delay
-    // stays high even at low rates, and cutting further only degrades the image.
-    static constexpr uint32_t kDelayFloorKbps = 50'000;
+    static constexpr uint32_t kMinKbps = kage::driver::BitrateController::kMinKbps, kStartKbps = 60'000;
     uint32_t bitrateKbps_ = kStartKbps, bestNetUs_ = 0;
     uint64_t lastEncoded_ = 0;  // network thread only (rate controller state below too)
-    uint64_t lastReportUs_ = 0, firstReportUs_ = 0, delayUs_ = 0, lastCutUs_ = 0, holdUntilUs_ = 0, lastLogUs_ = 0;
+    uint64_t lastReportUs_ = 0, lastLogUs_ = 0;
+    std::optional<kage::driver::BitrateController> rate_;
     std::atomic<uint32_t> pendingBitrate_{0};
 
     void vsyncLoop() {

@@ -35,3 +35,7 @@ add_executable(kage-encbench src/encbench.cpp src/amf_encoder.cpp)
 target_include_directories(kage-encbench PRIVATE ${CMAKE_SOURCE_DIR}/third_party/amf/include)
 target_link_libraries(kage-encbench PRIVATE kage::core d3d11 dxgi d3dcompiler)
 target_compile_options(kage-encbench PRIVATE /W3 /permissive- /utf-8)
+
+# Replays driver.log headset reports through the old and current bitrate controllers.
+add_executable(kage-bitrate-replay src/bitrate_replay.cpp)
+target_compile_options(kage-bitrate-replay PRIVATE /W3 /permissive- /utf-8)
