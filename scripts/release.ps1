@@ -32,3 +32,20 @@ gh release create "v$version" $zip "$zip.sha256" --repo $repo --title "KageVR $v
     --notes "Télécharger KageVR-Portable.zip, extraire, lancer KageVR.exe (voir LISEZMOI.txt). Mise à jour : bouton « Mettre à jour » dans KageVR."
 if ($LASTEXITCODE) { throw 'gh release create a échoué' }
 Write-Host "Publié : v$version ($repo)"
+
+# Desktop keeps only the latest version: KageVR-Portable.zip + KageVR\ (extracted).
+# The old copy goes to the Recycle Bin (recoverable), never a hard delete.
+$desk = [Environment]::GetFolderPath('Desktop')
+if (Get-Process KageVR -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$desk\KageVR\*" }) {
+    Write-Warning 'KageVR tourne depuis le Bureau : copie Bureau ignorée (fermer KageVR puis relancer).'
+} else {
+    Add-Type -AssemblyName Microsoft.VisualBasic
+    $fs = [Microsoft.VisualBasic.FileIO.FileSystem]
+    $ui = [Microsoft.VisualBasic.FileIO.UIOption]::OnlyErrorDialogs
+    $rb = [Microsoft.VisualBasic.FileIO.RecycleOption]::SendToRecycleBin
+    if (Test-Path "$desk\KageVR") { $fs::DeleteDirectory("$desk\KageVR", $ui, $rb) }
+    if (Test-Path "$desk\KageVR-Portable.zip") { $fs::DeleteFile("$desk\KageVR-Portable.zip", $ui, $rb) }
+    Copy-Item $zip "$desk\KageVR-Portable.zip"
+    Expand-Archive $zip "$desk\KageVR"
+    Write-Host "Bureau : KageVR $version"
+}
