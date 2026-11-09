@@ -68,8 +68,8 @@ private:
     std::atomic<uint64_t> lastRecvUs_{0};
     std::atomic<uint32_t> pacingKbps_{60000};
     static constexpr unsigned kFecGroup = 8;  // 1 parity per 8 data datagrams (+12.5 % traffic)
-    static constexpr uint16_t kProbeCount = 3000;
-    static constexpr double kProbeMbps = 350;
+    static constexpr uint16_t kProbeCount = 2000;
+    static constexpr double kProbeMbps = 200;
     std::atomic<bool> fec_{true};  // FEC parity on Wi-Fi; off on the USB bridge (loopback, lossless)
     std::atomic<uint8_t> clientFeatures_{0}, encoderFeatures_{0};
     std::atomic<uint8_t> clientFoveation_{0}, foveation_{0};  // wanted by the headset / applied

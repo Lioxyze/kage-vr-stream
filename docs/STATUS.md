@@ -71,3 +71,10 @@ Dernière mise à jour : 2026-11-06. Matériel de test : RX 6700 XT + **Meta Que
 - Menu de session : un appui long sur ☰ (manette gauche) l'ouvre (`menu: overlay open` dans logcat). Autre geste : X+Y maintenus 0,6 s.
 - Recentrer et netteté rapide : l'utilisateur dit que ça marche bien (aucune mesure).
 - Sonde de débit Wi-Fi : Non disponible (session en USB, la sonde ne tourne qu'en Wi-Fi).
+
+## Sonde de débit Wi-Fi au démarrage (test réel 2026-11-09)
+
+- Sonde à 350 Mbit/s × 3000 paquets : 1401/3000 reçus en 256 ms, soit 60 Mbit/s mesurés et un départ à 36 Mbit/s. La salve a fait perdre 21 images au démarrage, avec un rtt de 114 ms.
+- Sonde à 200 Mbit/s × 2000 paquets : 1220/2000 reçus en 387 ms, soit 34 Mbit/s mesurés et un départ à 20 Mbit/s. Aucune image perdue au démarrage.
+- Les deux sessions, sans la sonde, se stabilisent entre 20 et 33 Mbit/s avec de la congestion : la mesure correspond donc au Wi-Fi de ce soir. Le PC est lui aussi en Wi-Fi, donc chaque image passe deux fois par les ondes.
+- Le gain sur la latence ressentie n'est pas mesuré (Non disponible).

@@ -254,8 +254,8 @@ void StreamServer::sendVideo(uint32_t frameIndex, bool keyframe, const VideoFram
 }
 
 void StreamServer::runProbe(uint32_t id) {
-    // kProbeCount full-size datagrams paced at kProbeMbps: above any video rate we use, so the
-    // headset sees what the Wi-Fi really carries (about 4 MB, ~100 ms, once per session).
+    // kProbeCount full-size datagrams paced at kProbeMbps (= the top quality rate): at 350 Mbit/s
+    // half the burst was lost (PC Wi-Fi queue) and the measure collapsed to 60 Mbit/s. ~2.5 MB, ~100 ms.
     std::vector<uint8_t> payload;
     BandwidthProbe p{id, 0, kProbeCount, static_cast<uint16_t>(kMaxVideoPayload - 9)};
     const double usPerDatagram = (kMaxVideoPayload + PacketHeader::kSize + crypto::SecureSession::kOverhead) * 8.0 / kProbeMbps;
