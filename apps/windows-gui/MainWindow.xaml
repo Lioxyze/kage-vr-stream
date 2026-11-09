@@ -1,7 +1,7 @@
 <Window x:Class="KageVR.Gui.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="KAGÉ VR Stream" Width="1080" Height="720" MinWidth="860" MinHeight="600"
+        Title="LIO VR" Width="1080" Height="720" MinWidth="860" MinHeight="600"
         Background="{StaticResource Bg}" WindowStartupLocation="CenterScreen" Icon="kage.ico">
     <Grid Margin="18">
         <Grid.RowDefinitions>
@@ -13,9 +13,9 @@
 
         <!-- Header -->
         <StackPanel Orientation="Horizontal" Margin="6,0,0,12">
-            <Border Width="6" Background="{StaticResource Violet}" CornerRadius="3" Margin="0,4,12,4"/>
+            <Image Source="lio.png" Width="52" Height="52" Margin="0,0,14,0" RenderOptions.BitmapScalingMode="HighQuality"/>
             <StackPanel>
-                <TextBlock Text="KAGÉ VR Stream" FontSize="28" FontWeight="SemiBold"/>
+                <TextBlock Text="LIO VR" FontSize="28" FontWeight="SemiBold"/>
                 <TextBlock Text="Streaming PCVR sans fil vers Meta Quest" Foreground="{StaticResource Dim}" FontSize="13"/>
             </StackPanel>
         </StackPanel>

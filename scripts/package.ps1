@@ -13,6 +13,9 @@ if (-not $SkipBuild) {
     $env:JAVA_HOME = 'C:\Program Files\Microsoft\jdk-17.0.21.21-hotspot'
     Push-Location "$root\apps\quest-client"; .\gradlew.bat assembleDebug -q; Pop-Location
 }
+# The packaged adb (started by kage-host) and SteamVR (loads the driver DLL) lock files.
+Get-Process adb -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$out*" } | Stop-Process -Force
+if (Get-Process vrserver -ErrorAction SilentlyContinue) { throw "Fermer SteamVR avant de créer le paquet (le pilote est en cours d'utilisation)." }
 if (Test-Path $out) { Remove-Item $out -Recurse -Force }
 New-Item -ItemType Directory -Force "$out\driver" | Out-Null
 Copy-Item "$root\build\gui\*" $out -Recurse

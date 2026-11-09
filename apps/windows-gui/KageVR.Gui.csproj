@@ -12,5 +12,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Resource Include="kage.ico" />
+    <Resource Include="lio.png" />
   </ItemGroup>
 </Project>

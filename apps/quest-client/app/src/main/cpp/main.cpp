@@ -773,7 +773,7 @@ private:
         const float W = panel_.width, H = panel_.height, top = H / 2, left = -W / 2 + 0.05f;
         renderer_.quad(xm::mul(m, xm::fromPoseScale({{0, 0, 0, 1}, {0, 0, -0.002f}}, W, H, 1)), palette::kPanel);
         renderer_.quad(xm::mul(m, xm::fromPoseScale({{0, 0, 0, 1}, {0, top - 0.004f, -0.001f}}, W, 0.008f, 1)), palette::kViolet);
-        renderer_.text(m, left, top - 0.075f, 0.035f, "KAGÉ VR Stream", palette::kText);
+        renderer_.text(m, left, top - 0.075f, 0.035f, "LIO VR", palette::kText);
 
         for (const auto& b : buttons_) {
             const bool hov = b.id == hovered_;

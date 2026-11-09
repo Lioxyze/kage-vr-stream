@@ -21,7 +21,8 @@
     <application
         android:allowBackup="false"
         android:hasCode="false"
-        android:label="KAGÉ VR Stream">
+        android:icon="@mipmap/ic_launcher"
+        android:label="LIO VR">
 
         <meta-data android:name="com.oculus.supportedDevices" android:value="quest3|quest3s|quest2|questpro" />
 

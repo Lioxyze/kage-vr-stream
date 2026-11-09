@@ -86,7 +86,7 @@ bool XrApp::init(android_app* app) {
     ci.next = &ai;
     ci.enabledExtensionCount = static_cast<uint32_t>(enable.size());
     ci.enabledExtensionNames = enable.data();
-    std::strncpy(ci.applicationInfo.applicationName, "KAGE VR Stream", XR_MAX_APPLICATION_NAME_SIZE - 1);
+    std::strncpy(ci.applicationInfo.applicationName, "LIO VR", XR_MAX_APPLICATION_NAME_SIZE - 1);
     std::strncpy(ci.applicationInfo.engineName, "KAGE", XR_MAX_ENGINE_NAME_SIZE - 1);
     ci.applicationInfo.applicationVersion = 2;
     ci.applicationInfo.apiVersion = XR_MAKE_VERSION(1, 0, 0);
