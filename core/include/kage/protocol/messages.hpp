@@ -37,6 +37,8 @@ enum class MessageType : uint8_t {
     ClientStats = 44,     // client -> driver, ~1 Hz, feeds bitrate control
     CalibrateFullBody = 45,  // client -> driver: start the Rift CV1 calibration (15 s)
     StreamFeatures = 46,  // both ways: optional features (client: supported, driver: active)
+    BandwidthProbe = 47,  // driver -> client: burst measuring the Wi-Fi capacity at session start
+    ProbeResult = 48,     // client -> driver: what arrived of that burst
     PairRequest = 32,     // client -> kage-host, repeated while the user compares the code
     PairReply = 33,
     SecureHello = 50,     // client -> driver: static + ephemeral X25519 keys (clear)
@@ -218,6 +220,22 @@ inline float foveationA(uint8_t level) {
     return k[level > kMaxFoveation ? kMaxFoveation : level];
 }
 
+// Session-start capacity probe (Wi-Fi only): the driver sends `count` padded datagrams paced
+// above any useful video rate, the headset reports what arrived and over which span; the
+// driver starts the video at a share of that throughput instead of a fixed bitrate.
+struct BandwidthProbe {
+    uint32_t probeId = 0;
+    uint16_t index = 0;
+    uint16_t count = 0;
+    uint16_t padding = 0;  // zero bytes appended (not read back: the datagram size counts)
+};
+struct ProbeResult {
+    uint32_t probeId = 0;
+    uint16_t received = 0;
+    uint32_t bytes = 0;   // payload bytes received after the first datagram
+    uint32_t spanUs = 0;  // first -> last arrival
+};
+
 struct IdrRequest {
     uint32_t lastFrameIndex = 0;
 };
@@ -251,7 +269,8 @@ bool decodeFrameMeta(std::span<const uint8_t> in, VideoFrameMeta& m);
 
 using Message = std::variant<DiscoveryProbe, DiscoveryAnnounce, Ping, Pong, Heartbeat, Disconnect, TrackingState,
                              ConnectRequest, ConnectReply, StreamHello, StreamConfig, IdrRequest, Haptics, ClientStats,
-                             PairRequest, PairReply, SecureHello, SecureAccept, CalibrateFullBody, StreamFeatures>;
+                             PairRequest, PairReply, SecureHello, SecureAccept, CalibrateFullBody, StreamFeatures,
+                             BandwidthProbe, ProbeResult>;
 
 MessageType typeOf(const Message& m);
 

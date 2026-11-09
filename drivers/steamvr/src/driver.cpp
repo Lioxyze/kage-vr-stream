@@ -235,7 +235,8 @@ public:
             gpu_.enableDump(std::wstring(local) + L"\\KageVR\\frame.bmp");
         gpu_.setOutputSize(cfg_.width, cfg_.height);
         gpu_.setFoveation(net_.foveationA());
-        bitrateKbps_ = cfg_.bitrateKbps;  // start at the chosen quality; AIMD backs off on loss
+        // Start at the chosen quality, or at what the Wi-Fi probe measured if lower; AIMD then adapts.
+        bitrateKbps_ = probeStart(cfg_.bitrateKbps, net_.probeKbps());
         // Encoder: settings.ini "encoder" = auto (AMD AMF, then the GPU vendor through Media
         // Foundation: NVIDIA / Intel / AMD, then software), amf, gpu or software.
         const auto st = kage::driver::loadSettings();
@@ -334,6 +335,20 @@ public:
         vr::VRServerDriverHost()->TrackedDevicePoseUpdated(id_, pose_, sizeof(vr::DriverPose_t));
     }
     void requestIdr() { idr_ = true; }
+
+    // Session-start Wi-Fi measure: video + FEC (+12.5 %) + Wi-Fi jitter need headroom, so start at
+    // 60 % of the measured throughput (never above the chosen quality, never below the floor).
+    static uint32_t probeStart(uint32_t quality, uint32_t probeKbps) {
+        if (!probeKbps) return quality;
+        return std::clamp<uint32_t>(probeKbps * 6 / 10, kMinKbps, quality);
+    }
+    void onProbe(uint32_t kbps) {
+        const uint32_t br = probeStart(cfg_.bitrateKbps, kbps);
+        klog::info("bitrate: Wi-Fi start {} Mbit/s (measured {}, quality max {})", br / 1000, kbps / 1000, cfg_.bitrateKbps / 1000);
+        bitrateKbps_ = br;  // AIMD state is read on the network thread only, like onStats
+        pendingBitrate_ = br;
+        holdUntilUs_ = kage::monotonicMicros() + 2'000'000;  // no probing up right after
+    }
 
     // Deterministic AIMD bitrate control from the headset's 1 Hz report.
     // Congestion = lost frames, fewer frames than the refresh rate, or one-way transit
@@ -619,6 +634,9 @@ public:
         };
         server_.onStats = [this](const kp::ClientStats& s) {
             if (auto* h = hmd_.load()) h->onStats(s);
+        };
+        server_.onProbe = [this](uint32_t kbps) {
+            if (auto* h = hmd_.load()) h->onProbe(kbps);
         };
         if (!server_.start(kp::kDefaultStreamPort, dir)) return vr::VRInitError_Driver_Failed;
         audio_.enabled = [this] { return server_.clientActive(); };

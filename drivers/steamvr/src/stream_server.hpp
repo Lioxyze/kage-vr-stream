@@ -27,6 +27,7 @@ public:
     std::function<void(const protocol::ClientStats&)> onStats;
     std::function<void()> onCalibrateFullBody;
     std::function<void(uint32_t, std::span<const int16_t>)> onMic;  // headset microphone
+    std::function<void(uint32_t kbps)> onProbe;  // Wi-Fi throughput measured at session start
 
     // dataDir holds host.key and paired.txt (shared with kage-host).
     bool start(uint16_t port, const std::filesystem::path& dataDir);
@@ -45,6 +46,7 @@ public:
     float foveationA() const { return protocol::foveationA(foveation_); }
     void sendHaptics(const protocol::Haptics& h);
     void setPacingKbps(uint32_t kbps) { pacingKbps_ = kbps; }
+    uint32_t probeKbps() const { return probeKbps_; }  // last session-start measure (0 = none)
     // Raw PCM on the audio channel: u32 sample rate (LE) + interleaved stereo int16.
     void sendAudio(uint32_t sampleRate, std::span<const int16_t> samples);
 
@@ -53,6 +55,7 @@ private:
     void handleSecureHello(const protocol::SecureHello& h, const net::Endpoint& from);
     void send(protocol::Channel ch, std::span<const uint8_t> payload);
     void sendFeatures();
+    void runProbe(uint32_t id);
     protocol::StreamConfig makeConfig(const protocol::StreamHello& h) const;
 
     net::UdpSocket sock_;
@@ -65,9 +68,14 @@ private:
     std::atomic<uint64_t> lastRecvUs_{0};
     std::atomic<uint32_t> pacingKbps_{60000};
     static constexpr unsigned kFecGroup = 8;  // 1 parity per 8 data datagrams (+12.5 % traffic)
+    static constexpr uint16_t kProbeCount = 3000;
+    static constexpr double kProbeMbps = 350;
     std::atomic<bool> fec_{true};  // FEC parity on Wi-Fi; off on the USB bridge (loopback, lossless)
     std::atomic<uint8_t> clientFeatures_{0}, encoderFeatures_{0};
     std::atomic<uint8_t> clientFoveation_{0}, foveation_{0};  // wanted by the headset / applied
+    std::thread probeThread_;
+    std::atomic<bool> probeStarted_{false};  // once per session
+    std::atomic<uint32_t> probeId_{0}, probeKbps_{0};
     uint64_t paceUntilUs_ = 0;  // encoder thread only
     uint8_t nextSlice_ = 0;
     std::mutex sendMutex_;  // also guards session_ (counter) and the send buffers

@@ -270,7 +270,7 @@ struct FpsMode {
     int fps;
     float displayHz;
 };
-constexpr FpsMode kModes[] = {{45, 90.f}, {60, 120.f}, {72, 72.f}, {90, 90.f}};
+constexpr FpsMode kModes[] = {{45, 90.f}, {60, 120.f}, {72, 72.f}, {90, 90.f}, {120, 120.f}};  // 120: GPU + encoder permitting
 // Quality: render resolution scale (per axis) + max bitrate. Applied at the next SteamVR start
 // (the PC keeps the resolution for the whole SteamVR session).
 struct Quality {
@@ -335,7 +335,7 @@ const Button* buttonAt(const std::vector<Button>& b, float u, float v) {
 std::string ms(float v) { return v >= 0 ? std::format("{:.1f} ms", v) : std::string("Non disponible"); }
 
 enum class Mode { Lobby, Connecting, Streaming };
-enum ButtonId { kBtnHost0 = 100, kBtnRate0 = 200, kBtnQuality0 = 400, kBtnRes0 = 500, kBtnFov0 = 600, kBtnSharp0 = 700, kBtnDisconnect = 300, kBtnResume = 301, kBtnRecenter = 302, kBtnCalibrate = 303, kBtnMic = 304 };
+enum ButtonId { kBtnHost0 = 100, kBtnRate0 = 200, kBtnQuality0 = 400, kBtnRes0 = 500, kBtnFov0 = 600, kBtnSharp0 = 700, kBtnDisconnect = 300, kBtnResume = 301, kBtnRecenter = 302, kBtnCalibrate = 303, kBtnMic = 304, kBtnQuickSharp0 = 800 };
 
 // ---------------------------------------------------------------------------
 class App {
@@ -533,6 +533,7 @@ private:
         XrPosef head;
         if (xr_.locateHead(target, head)) {
             t.headFlags = kp::kPoseValid;
+            head = xm::compose(recenter_, head);
             t.head.position = {head.position.x, head.position.y, head.position.z};
             t.head.orientation = {head.orientation.x, head.orientation.y, head.orientation.z, head.orientation.w};
         }
@@ -544,6 +545,7 @@ private:
             XrPosef p;
             if (in.active && xr_.locateController(i, target, p)) {
                 o.flags = kp::kConnected | kp::kPoseValid;
+                p = xm::compose(recenter_, p);
                 o.pose.position = {p.position.x, p.position.y, p.position.z};
                 o.pose.orientation = {p.orientation.x, p.orientation.y, p.orientation.z, p.orientation.w};
             }
@@ -573,8 +575,10 @@ private:
         }
         if (!decoder_.hasFrame()) return;
         const auto& rp = frameMeta_.renderPose;
-        const XrPosef render{{rp.orientation[0], rp.orientation[1], rp.orientation[2], rp.orientation[3]},
-                             {rp.position[0], rp.position[1], rp.position[2]}};
+        // The PC renders in the recentred space: bring its pose back to the headset's space.
+        const XrPosef render = xm::compose(xm::inverse(recenter_),
+                                           XrPosef{{rp.orientation[0], rp.orientation[1], rp.orientation[2], rp.orientation[3]},
+                                                   {rp.position[0], rp.position[1], rp.position[2]}});
         for (int i = 0; i < 2; ++i) c.submitPose[i] = xm::compose(render, c.eyeInHead[i]);
         ctx_ = c;
         if (!stream_.videoFlowing()) {
@@ -633,6 +637,10 @@ private:
                                        : "Micro : désactivé",
                                 kBtnMic, true});
             buttons_.back().selected = micOn_;
+            for (size_t i = 0; i < std::size(kSharpNames); ++i) {  // quick setting: sharpening, live
+                buttons_.push_back({-0.24f + i * 0.16f, -top + 0.38f, 0.14f, 0.06f, kSharpNames[i], kBtnQuickSharp0 + static_cast<int>(i), true});
+                buttons_.back().selected = static_cast<int>(i) == sharp_;
+            }
             buttons_.push_back({0.30f, -top + 0.09f, 0.24f, 0.07f, "Déconnecter", kBtnDisconnect});
         }
     }
@@ -671,7 +679,17 @@ private:
             stream_.requestFullBodyCalibration();
             calibUntilUs_ = monotonicMicros() + 28'000'000;  // 3 s countdown + 25 s of samples
         } else if (id == kBtnRecenter && ctx_.headValid) {
+            // Recentre the game: the current head position/direction becomes the centre (yaw only,
+            // height kept). Applied to every pose sent to the PC, undone on the rendered frames.
+            XrVector3f fwd = xm::rotate(ctx_.head.orientation, {0, 0, -1});
+            const float yaw = std::atan2(-fwd.x, -fwd.z);
+            const XrQuaternionf q{0, std::sin(-yaw / 2), 0, std::cos(-yaw / 2)};
+            const XrVector3f p = xm::rotate(q, {ctx_.head.position.x, 0, ctx_.head.position.z});
+            recenter_ = {q, {-p.x, 0, -p.z}};
             panel_.placeInFront(ctx_.head, 0.9f);
+        } else if (id >= kBtnQuickSharp0 && id < kBtnQuickSharp0 + static_cast<int>(std::size(kSharpNames))) {
+            sharp_ = id - kBtnQuickSharp0;  // live
+            std::ofstream(dataDir_ / "sharp.txt", std::ios::trunc) << sharp_;
         }
     }
 
@@ -838,6 +856,7 @@ private:
     bool panelPlaced_ = false;
     Mode mode_ = Mode::Lobby;
     bool overlay_ = false;
+    XrPosef recenter_{{0, 0, 0, 1}, {0, 0, 0}};  // headset space -> game space ("Recentrer")
     std::vector<Lan::Host> hosts_;
     Lan::Host target_;
     std::vector<Button> buttons_;

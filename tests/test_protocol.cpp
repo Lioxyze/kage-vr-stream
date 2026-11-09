@@ -269,3 +269,15 @@ TEST(stream_features_roundtrip_and_unknown_bits) {
           (kFeatureSliceUnits | kFeatureIntraRefresh));
     CHECK(roundtrip(StreamFeatures{0xFF}).flags == 0xFF);  // future bits pass through, ignored by users
 }
+
+TEST(bandwidth_probe_roundtrip) {
+    std::vector<uint8_t> buf;
+    encodeMessage(BandwidthProbe{7, 3, 40, 1200}, buf);
+    CHECK(buf.size() == 1 + 8 + 1200);
+    const auto m = decodeMessage(buf);
+    CHECK(m.has_value());
+    const auto* p = std::get_if<BandwidthProbe>(&*m);
+    CHECK(p && p->probeId == 7 && p->index == 3 && p->count == 40 && p->padding == 1200);
+    const auto r = roundtrip(ProbeResult{7, 39, 46800, 4200});
+    CHECK(r.probeId == 7 && r.received == 39 && r.bytes == 46800 && r.spanUs == 4200);
+}

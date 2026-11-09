@@ -118,6 +118,17 @@ void StreamClient::loop() {
     std::vector<uint8_t> sliceBuf;  // slices of the frame being joined (kFrameSliced)
     uint32_t sliceFrame = 0, sliceNext = 0;  // sliceNext = expected slice (0 = none in progress)
     bool sliceKey = false;
+    // Session-start Wi-Fi probe from the PC (BandwidthProbe): what arrived, over which span.
+    kp::ProbeResult probe;
+    uint64_t probeFirstUs = 0, probeLastUs = 0;
+    bool probeOpen = false;
+    auto sendProbe = [&] {
+        probe.spanUs = static_cast<uint32_t>(probeLastUs - probeFirstUs);
+        send(kp::Channel::Control, probe);
+        klog::info("stream: Wi-Fi probe {} datagrams, {:.1f} Mbit/s", probe.received,
+                   probe.spanUs ? probe.bytes * 8.0 / probe.spanUs : 0.0);
+        probeOpen = false;
+    };
     const kp::StreamFeatures myFeatures{kp::kFeatureSliceUnits | kp::kFeatureIntraRefresh, wantFoveation_.load()};
     driverFoveation_ = 0;
 
@@ -131,6 +142,7 @@ void StreamClient::loop() {
             send(kp::Channel::Control, hello_);
             lastHello = now;
         }
+        if (probeOpen && now - probeFirstUs > 400'000) sendProbe();  // tail lost: report what came
         if (secured_ && now - lastPing > 250'000) {
             pingSent[pingId % 64] = now;
             send(kp::Channel::Control, kp::Ping{pingId++, now});
@@ -292,6 +304,19 @@ void StreamClient::loop() {
                                                         (fe->flags & kp::kFeatureSliceUnits) != 0, (fe->flags & kp::kFeatureIntraRefresh) != 0);
             driverFeatures = fe->flags;
             driverFoveation_ = fe->foveation;
+        } else if (auto* bp = std::get_if<kp::BandwidthProbe>(&*msg)) {
+            if (bp->probeId != probe.probeId) {  // new burst (an old one is never reported twice)
+                probe = {bp->probeId, 0, 0, 0};
+                probeFirstUs = recvUs;
+                probeOpen = true;
+            } else if (probeOpen) {
+                probe.bytes += static_cast<uint32_t>(n);  // datagram size: what the Wi-Fi carried
+            }
+            if (probeOpen) {
+                ++probe.received;
+                probeLastUs = recvUs;
+                if (bp->index + 1u >= bp->count) sendProbe();
+            }
         } else if (auto* hp = std::get_if<kp::Haptics>(&*msg)) {
             std::lock_guard l(mutex_);
             if (haptics_.size() < 16) haptics_.push_back(*hp);

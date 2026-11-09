@@ -39,6 +39,7 @@ bool StreamServer::start(uint16_t port, const std::filesystem::path& dataDir) {
 void StreamServer::stop() {
     if (!running_.exchange(false)) return;
     if (thread_.joinable()) thread_.join();
+    if (probeThread_.joinable()) probeThread_.join();
 }
 
 std::optional<StreamHello> StreamServer::hello() const {
@@ -123,6 +124,11 @@ void StreamServer::recvLoop() {
             encodeMessage(cfg, payload);
             send(Channel::Control, payload);
             sendFeatures();
+            // Wi-Fi: measure the link once per session so the video starts at a rate it can carry.
+            if (fec_ && !probeStarted_.exchange(true)) {
+                if (probeThread_.joinable()) probeThread_.join();
+                probeThread_ = std::thread(&StreamServer::runProbe, this, ++probeId_);
+            }
             continue;
         }
         lastRecvUs_ = monotonicMicros();
@@ -138,6 +144,14 @@ void StreamServer::recvLoop() {
         } else if (auto* fe = std::get_if<StreamFeatures>(&*msg)) {
             clientFeatures_ = fe->flags;
             clientFoveation_ = fe->foveation;
+        } else if (auto* pr = std::get_if<ProbeResult>(&*msg)) {
+            if (pr->probeId == probeId_ && pr->received >= 20 && pr->spanUs >= 5000 && !probeKbps_) {
+                const uint32_t kbps = static_cast<uint32_t>(static_cast<uint64_t>(pr->bytes) * 8000 / pr->spanUs);
+                probeKbps_ = kbps;
+                log::info("stream: Wi-Fi probe {}/{} datagrams in {:.1f} ms -> {} Mbit/s", pr->received, kProbeCount,
+                          pr->spanUs / 1000.0, kbps / 1000);
+                if (onProbe) onProbe(kbps);
+            }
         } else if (auto* p = std::get_if<Ping>(&*msg)) {
             Pong pong{p->pingId, p->clientSendUs, lastRecvUs_.load(), monotonicMicros()};
             encodeMessage(pong, payload);
@@ -187,6 +201,8 @@ void StreamServer::handleSecureHello(const SecureHello& sh, const net::Endpoint&
         client_ = from;
         fec_ = (from.ipv4 >> 24) != 127;  // USB bridge (loopback) never loses packets
         clientFeatures_ = 0;  // the headset re-announces its features in this session
+        probeStarted_ = false;
+        probeKbps_ = 0;
         log::info("stream: encrypted session with {} established, Wi-Fi priority {}", from.toString(),
                   sock_.setLowLatencyPriority(from) ? "on" : "unavailable");
     }
@@ -235,6 +251,22 @@ void StreamServer::sendVideo(uint32_t frameIndex, bool keyframe, const VideoFram
                   },
                   kMaxVideoPayload, fec_ ? kFecGroup : 0);
     paceUntilUs_ = t0 + static_cast<uint64_t>(sent * 8 * 1e6 / bps);
+}
+
+void StreamServer::runProbe(uint32_t id) {
+    // kProbeCount full-size datagrams paced at kProbeMbps: above any video rate we use, so the
+    // headset sees what the Wi-Fi really carries (about 4 MB, ~100 ms, once per session).
+    std::vector<uint8_t> payload;
+    BandwidthProbe p{id, 0, kProbeCount, static_cast<uint16_t>(kMaxVideoPayload - 9)};
+    const double usPerDatagram = (kMaxVideoPayload + PacketHeader::kSize + crypto::SecureSession::kOverhead) * 8.0 / kProbeMbps;
+    const uint64_t t0 = monotonicMicros();
+    for (uint16_t i = 0; i < kProbeCount && running_; ++i) {
+        const uint64_t due = t0 + static_cast<uint64_t>(i * usPerDatagram);
+        while (monotonicMicros() < due) std::this_thread::yield();
+        p.index = i;
+        encodeMessage(p, payload);
+        send(Channel::Control, payload);
+    }
 }
 
 uint8_t StreamServer::activeFeatures() const {

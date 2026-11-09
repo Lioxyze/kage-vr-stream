@@ -111,6 +111,8 @@ MessageType typeOf(const Message& m) {
                           [](const SecureAccept&) { return MessageType::SecureAccept; },
                           [](const CalibrateFullBody&) { return MessageType::CalibrateFullBody; },
                           [](const StreamFeatures&) { return MessageType::StreamFeatures; },
+                          [](const BandwidthProbe&) { return MessageType::BandwidthProbe; },
+                          [](const ProbeResult&) { return MessageType::ProbeResult; },
                       },
                       m);
 }
@@ -170,6 +172,18 @@ void encodeMessage(const Message& m, std::vector<uint8_t>& out) {
                    [&](const StreamFeatures& f) {
                        w.u8(f.flags);
                        w.u8(f.foveation);
+                   },
+                   [&](const BandwidthProbe& p) {
+                       w.u32(p.probeId);
+                       w.u16(p.index);
+                       w.u16(p.count);
+                       for (uint16_t i = 0; i < p.padding; ++i) w.u8(0);
+                   },
+                   [&](const ProbeResult& p) {
+                       w.u32(p.probeId);
+                       w.u16(p.received);
+                       w.u32(p.bytes);
+                       w.u32(p.spanUs);
                    },
                    [&](const SecureAccept& c) {
                        w.bytes(c.hostEphemeral);
@@ -328,6 +342,24 @@ std::optional<Message> decodeMessage(std::span<const uint8_t> payload) {
             r.u8(f.foveation);
             if (f.foveation > kMaxFoveation) f.foveation = kMaxFoveation;
             result = f;
+            break;
+        }
+        case MessageType::BandwidthProbe: {
+            BandwidthProbe p;
+            r.u32(p.probeId);
+            r.u16(p.index);
+            r.u16(p.count);
+            p.padding = static_cast<uint16_t>(std::min<size_t>(r.rest().size(), 0xFFFF));
+            result = p;
+            break;
+        }
+        case MessageType::ProbeResult: {
+            ProbeResult p;
+            r.u32(p.probeId);
+            r.u16(p.received);
+            r.u32(p.bytes);
+            r.u32(p.spanUs);
+            result = p;
             break;
         }
         case MessageType::SecureAccept: {
