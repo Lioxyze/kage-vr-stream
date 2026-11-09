@@ -63,3 +63,11 @@ Dernière mise à jour : 2026-11-06. Matériel de test : RX 6700 XT + **Meta Que
 - Avant ce changement, session de 34 s à 60 i/s plafonnée à 60 Mbit/s : 0,62 image perdue/s, transit 16,5 ms, pics sur 11 % des secondes.
 - Les conditions ne sont pas les mêmes (débit ×2,5, durée différente), donc pas de comparaison stricte. L'utilisateur ressent beaucoup moins de saccades.
 - Nombre de fragments récupérés par la FEC : Non disponible (logcat non lu, câble débranché).
+
+## 120 i/s, Vue VR, menu (test réel 2026-11-09, câble USB)
+
+- 120 i/s (Quest 120 Hz, HEVC 2832×1488) : 116 à 120 i/s, 0 image perdue, décodage 3,5 à 4,2 ms, rtt 2 à 8 ms. Le débit monte à 150 Mbit/s.
+- Vue VR SteamVR : l'image s'affiche, en deux yeux côte à côte. Elle n'était pas noire, la fenêtre était juste réduite. `showMirrorView` est à true dans steamvr.vrsettings.
+- Menu de session : un appui long sur ☰ (manette gauche) l'ouvre (`menu: overlay open` dans logcat). Autre geste : X+Y maintenus 0,6 s.
+- Recentrer et netteté rapide : l'utilisateur dit que ça marche bien (aucune mesure).
+- Sonde de débit Wi-Fi : Non disponible (session en USB, la sonde ne tourne qu'en Wi-Fi).

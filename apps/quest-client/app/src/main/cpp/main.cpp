@@ -422,17 +422,26 @@ private:
     }
 
     void updateMenuToggle() {
-        const bool menu = xr_.controllers()[0].menu;
+        // Long press on left Menu, or X+Y held together (fallback if the runtime keeps Menu).
+        const auto& lc = xr_.controllers()[0];
+        const bool xy = lc.btn1 && lc.btn2;
+        const bool menu = lc.menu || xy;
         const uint64_t now = monotonicMicros();
-        if (menu && !menuWasDown_) menuDownAt_ = now;
+        if (menu && !menuWasDown_) {
+            menuDownAt_ = now;
+            klog::info("menu: press ({})", xy ? "X+Y" : "Menu");
+        }
         if (menu && menuDownAt_ && now - menuDownAt_ > 600'000 && mode_ == Mode::Streaming) {
             overlay_ = !overlay_;
+            klog::info("menu: overlay {}", overlay_ ? "open" : "closed");
             menuDownAt_ = 0;  // one toggle per press
             if (overlay_ && ctx_.headValid) panel_.placeInFront(ctx_.head, 0.9f);
         }
         // Short press (released before the long-press delay): one 120 ms click of the SteamVR
         // system button, which opens the SteamVR dashboard.
-        if (!menu && menuWasDown_ && menuDownAt_ && now - menuDownAt_ < 600'000) menuPulseUntil_ = now + 120'000;
+        if (!menu && menuWasDown_ && menuDownAt_ && now - menuDownAt_ < 600'000 && !menuWasXy_)
+            menuPulseUntil_ = now + 120'000;
+        if (menu) menuWasXy_ = xy && !lc.menu;
         if (!menu) menuDownAt_ = 0;
         menuWasDown_ = menu;
     }
@@ -879,7 +888,7 @@ private:
     uint64_t calibUntilUs_ = 0;
     uint64_t menuPulseUntil_ = 0;  // short press on left Menu -> SteamVR system click
     uint64_t connectStartUs_ = 0, lostSinceUs_ = 0, menuDownAt_ = 0;
-    bool menuWasDown_ = false, autoTried_ = false;
+    bool menuWasDown_ = false, menuWasXy_ = false, autoTried_ = false;
     FrameContext ctx_;
     kp::VideoFrameMeta frameMeta_;
     int res_ = 0, fov_ = 0, sharp_ = 1;  // resolution, foveation, sharpening levels (menu)
