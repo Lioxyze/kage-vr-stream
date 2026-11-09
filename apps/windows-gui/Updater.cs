@@ -24,6 +24,24 @@ public partial class MainWindow
         try { return File.ReadAllText(Path.Combine(AppDir, "version.txt")).Trim(); } catch { return "0"; }
     }
 
+    // At launch: only tells that a newer version exists (button label + log), never installs.
+    // One anonymous GET to the public releases API; silent when offline.
+    async void CheckUpdateAtStartup()
+    {
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+            http.DefaultRequestHeaders.UserAgent.ParseAdd("KageVR-Updater");
+            using var doc = JsonDocument.Parse(await http.GetStringAsync(ReleasesApi));
+            var remote = (doc.RootElement.GetProperty("tag_name").GetString() ?? "").TrimStart('v');
+            if (string.CompareOrdinal(remote, LocalVersion()) <= 0) return;
+            UpdateButton.Content = "Mettre à jour ●";
+            UpdateButton.ToolTip = $"Nouvelle version {remote} disponible (actuelle : {LocalVersion()})";
+            Log($"Nouvelle version {remote} disponible : bouton « Mettre à jour » (actuelle : {LocalVersion()}).");
+        }
+        catch { /* offline or GitHub unreachable: the button still works by hand */ }
+    }
+
     async void OnUpdate(object sender, RoutedEventArgs e)
     {
         try

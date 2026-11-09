@@ -84,3 +84,27 @@ Dernière mise à jour : 2026-11-06. Matériel de test : RX 6700 XT + **Meta Que
 - L'ancienne version 2026.11.09.1658, extraite dans un dossier à part, propose bien la 1952. Après « Oui », KageVR se ferme, les fichiers sont remplacés et KageVR redémarre tout seul. version.txt passe à 2026.11.09.1952 et driver_kage.dll est identique à celui de la release.
 - L'APK du casque branché en USB est réinstallé (lastUpdateTime 20:02:32).
 - Le SHA-256 est vérifié par le code avant de remplacer les fichiers (aucune erreur). Le cas d'un fichier corrompu n'a pas été testé.
+
+## Latence d'encodage côté PC : banc `kage-encbench` (mesure réelle 2026-11-09, sans casque)
+
+`build/drivers/steamvr/Release/kage-encbench.exe [charge]` : AMF HEVC 2832×1488 à 100 Mbit/s, tranches et rafraîchissement progressif comme le pilote, image de synthèse animée. On mesure le temps entre l'envoi d'une image à l'encodeur et la sortie de sa dernière tranche (médiane / p95).
+
+| preset | 72 i/s | 90 i/s | 120 i/s |
+|---|---|---|---|
+| quality | 6,26 / 6,78 ms | 6,28 / 8,76 | 6,27 / 9,86 |
+| balanced | 5,22 / 6,89 | 5,22 / 7,32 | 5,23 / 8,05 |
+| speed | 5,12 / 7,68 | 5,09 / 5,84 | 5,12 / 7,24 |
+
+- Changement : le preset « balanced » est maintenant utilisé à toutes les cadences (avant : « quality » à 72 i/s et moins). Gain mesuré : environ 1 ms d'encodage à 72 i/s et moins. Effet sur la qualité d'image : Non disponible (pas de mesure objective).
+- Avec la carte graphique chargée par un faux jeu (`charge`) : 36 à 40 ms en médiane, contre 5,2 ms sans charge. `SetGPUThreadPriority(7)` et `D3DKMTSetProcessSchedulingPriorityClass` HIGH ou REALTIME sont acceptés mais ne changent rien (écart inférieur à 1 ms), donc ils ne sont pas appliqués au pilote.
+- En jeu réel (driver.log, toute la journée) : temps « encode » moyen de 5,4 ms à 120 i/s, 7,3 ms à 90 i/s et 8 à 12 ms à 60 i/s. L'écart avec le banc vient probablement de l'occupation du GPU par le jeu (supposition, non mesurée séparément).
+
+## Diagnostic Wi-Fi (kage-host probe, 2026-11-09)
+
+- L'onglet Diagnostic affiche maintenant le SSID, la norme, la fréquence exacte, le canal, le signal et les débits négociés du Wi-Fi du PC, avec des alertes en cas de 2,4 GHz, de signal sous 60 % ou de débit négocié sous 400 Mbit/s.
+- Mesure du PC : Wi-Fi 6 (802.11ax), 5,320 GHz, canal 64, signal 85 %, 2402 Mbit/s négociés. La liaison PC → box n'est donc pas le point faible : la limite d'environ 30 Mbit/s vue ce soir vient d'ailleurs (côté casque ou encombrement des ondes, Non disponible).
+- Le pilote KAGÉ n'est plus signalé comme « autre pilote OpenVR ».
+
+## Mise à jour : vérification au démarrage
+
+- Au lancement, KageVR interroge l'API publique des releases et affiche « Mettre à jour ● » si une version plus récente existe. Il n'installe jamais rien tout seul. Testé avec version.txt = 1658 : la pastille s'affiche.

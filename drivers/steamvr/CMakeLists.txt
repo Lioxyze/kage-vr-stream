@@ -29,3 +29,9 @@ add_custom_command(TARGET driver_kage POST_BUILD
 # Rift CV1 full body: poses come from kage-host over 127.0.0.1 (no LibOVR in SteamVR).
 target_sources(driver_kage PRIVATE src/rift_tracking.cpp)
 target_compile_definitions(driver_kage PRIVATE KAGE_WITH_RIFT=1)
+
+# PC-side latency bench (no headset): AMF encode latency per preset and frame rate.
+add_executable(kage-encbench src/encbench.cpp src/amf_encoder.cpp)
+target_include_directories(kage-encbench PRIVATE ${CMAKE_SOURCE_DIR}/third_party/amf/include)
+target_link_libraries(kage-encbench PRIVATE kage::core d3d11 dxgi d3dcompiler)
+target_compile_options(kage-encbench PRIVATE /W3 /permissive- /utf-8)

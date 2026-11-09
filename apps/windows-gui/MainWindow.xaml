@@ -47,7 +47,7 @@
             <Button x:Name="DriverButton" Content="Installer le pilote SteamVR" Click="OnDriverClick"/>
             <Button Content="Lancer le diagnostic" Click="OnDiagnostic"/>
             <Button Content="Oublier les casques appairés" Click="OnForgetPaired"/>
-            <Button Content="Mettre à jour" Click="OnUpdate"/>
+            <Button x:Name="UpdateButton" Content="Mettre à jour" Click="OnUpdate"/>
         </WrapPanel>
 
         <!-- Tabs -->

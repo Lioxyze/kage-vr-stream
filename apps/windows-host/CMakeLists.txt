@@ -2,7 +2,7 @@ add_executable(kage-host
     src/main.cpp
     src/probe.cpp
 )
-target_link_libraries(kage-host PRIVATE kage::core dxgi mfplat mfuuid iphlpapi)
+target_link_libraries(kage-host PRIVATE kage::core dxgi mfplat mfuuid iphlpapi wlanapi ole32)
 if(MSVC)
     target_compile_options(kage-host PRIVATE /W4 /permissive- /utf-8)
 endif()

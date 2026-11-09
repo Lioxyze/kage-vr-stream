@@ -32,6 +32,7 @@ public:
     // Requested before init(); the encoder reports what it really enabled.
     bool wantIntraRefresh = false;  // progressive refresh instead of keyframes after a loss
     bool wantSlices = false;        // output slices as soon as each is encoded
+    int preset = -1;                // AMF speed preset: -1 auto, 0 speed, 1 balanced, 2 quality (bench)
     bool intraRefreshOn = false;
     bool slicesOn = false;
 };

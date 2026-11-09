@@ -5,6 +5,8 @@
 #include <windows.h>
 #include <dxgi1_6.h>
 #include <iphlpapi.h>
+#include <objbase.h>
+#include <wlanapi.h>
 #include <mfapi.h>
 #include <mfidl.h>
 #include <mftransform.h>
@@ -220,6 +222,72 @@ SteamVrInfo probeSteamVr() {
     return info;
 }
 
+std::string lowerAscii(std::string s) {
+    for (auto& c : s) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+const char* phyName(DOT11_PHY_TYPE t) {
+    switch (static_cast<int>(t)) {
+        case dot11_phy_type_ofdm: return "802.11a";
+        case dot11_phy_type_erp: return "802.11g";
+        case dot11_phy_type_ht: return "Wi-Fi 4 (802.11n)";
+        case dot11_phy_type_vht: return "Wi-Fi 5 (802.11ac)";
+        case 10: return "Wi-Fi 6 (802.11ax)";  // dot11_phy_type_he (newer SDKs)
+        case 11: return "Wi-Fi 7 (802.11be)";  // dot11_phy_type_eht
+        default: return "";
+    }
+}
+
+// Band, channel, negotiated rates and signal of the connected Wi-Fi adapters (WLAN API).
+void fillWifi(std::vector<NetAdapterInfo>& nets) {
+    HANDLE h = nullptr;
+    DWORD ver = 0;
+    if (WlanOpenHandle(2, nullptr, &ver, &h) != ERROR_SUCCESS) return;
+    WLAN_INTERFACE_INFO_LIST* list = nullptr;
+    if (WlanEnumInterfaces(h, nullptr, &list) == ERROR_SUCCESS) {
+        for (DWORD i = 0; i < list->dwNumberOfItems; ++i) {
+            const auto& itf = list->InterfaceInfo[i];
+            if (itf.isState != wlan_interface_state_connected) continue;
+            wchar_t g[64];
+            StringFromGUID2(itf.InterfaceGuid, g, 64);
+            const std::string guid = lowerAscii(utf8(g));
+            auto it = std::find_if(nets.begin(), nets.end(), [&](auto& n) { return n.guid == guid; });
+            if (it == nets.end()) continue;
+            DWORD size = 0;
+            WLAN_CONNECTION_ATTRIBUTES* c = nullptr;
+            if (WlanQueryInterface(h, &itf.InterfaceGuid, wlan_intf_opcode_current_connection, nullptr, &size,
+                                   reinterpret_cast<void**>(&c), nullptr) == ERROR_SUCCESS) {
+                const auto& as = c->wlanAssociationAttributes;
+                it->ssid.assign(reinterpret_cast<const char*>(as.dot11Ssid.ucSSID), as.dot11Ssid.uSSIDLength);
+                it->phy = phyName(as.dot11PhyType);
+                it->signalPct = as.wlanSignalQuality;
+                it->rxMbps = as.ulRxRate / 1000;
+                it->txMbps = as.ulTxRate / 1000;
+                // Exact centre frequency of the connected access point (tells 2.4 / 5 / 6 GHz apart).
+                WLAN_BSS_LIST* bss = nullptr;
+                DOT11_SSID ssid = as.dot11Ssid;
+                if (WlanGetNetworkBssList(h, &itf.InterfaceGuid, &ssid, as.dot11BssType, TRUE, nullptr, &bss) ==
+                    ERROR_SUCCESS) {
+                    for (DWORD b = 0; b < bss->dwNumberOfItems; ++b)
+                        if (memcmp(bss->wlanBssEntries[b].dot11Bssid, as.dot11Bssid, 6) == 0)
+                            it->freqMHz = bss->wlanBssEntries[b].ulChCenterFrequency / 1000;
+                    WlanFreeMemory(bss);
+                }
+                WlanFreeMemory(c);
+            }
+            ULONG* ch = nullptr;
+            if (WlanQueryInterface(h, &itf.InterfaceGuid, wlan_intf_opcode_channel_number, nullptr, &size,
+                                   reinterpret_cast<void**>(&ch), nullptr) == ERROR_SUCCESS) {
+                it->channel = *ch;
+                WlanFreeMemory(ch);
+            }
+        }
+        WlanFreeMemory(list);
+    }
+    WlanCloseHandle(h, nullptr);
+}
+
 std::vector<NetAdapterInfo> probeNetwork() {
     std::vector<NetAdapterInfo> out;
     ULONG size = 32 * 1024;
@@ -242,6 +310,7 @@ std::vector<NetAdapterInfo> probeNetwork() {
         if (!hardware) n.type = "virtuel";
         else n.type = a->IfType == IF_TYPE_IEEE80211 ? "Wi-Fi" : a->IfType == IF_TYPE_ETHERNET_CSMACD ? "Ethernet" : "other";
         n.linkSpeedBps = a->TransmitLinkSpeed == ~0ull ? 0 : a->TransmitLinkSpeed;
+        n.guid = lowerAscii(a->AdapterName ? a->AdapterName : "");
         for (auto* u = a->FirstUnicastAddress; u; u = u->Next) {
             auto* sin = reinterpret_cast<sockaddr_in*>(u->Address.lpSockaddr);
             char ip[16];
@@ -250,6 +319,7 @@ std::vector<NetAdapterInfo> probeNetwork() {
         }
         if (!n.ipv4.empty()) out.push_back(std::move(n));
     }
+    fillWifi(out);
     return out;
 }
 
@@ -278,10 +348,24 @@ void addWarnings(SystemReport& r) {
         r.warnings.push_back("GPU AMD détecté mais runtime AMF (amfrt64.dll) introuvable : vérifier le pilote Adrenalin.");
     if (!r.steamvr.vrserverPresent)
         r.warnings.push_back("SteamVR introuvable (openvrpaths.vrpath / vrserver.exe) : nécessaire pour la phase 6.");
-    for (const auto& d : r.steamvr.externalDrivers)
+    for (const auto& d : r.steamvr.externalDrivers) {
+        const auto l = lower(d);
+        if (l.ends_with("\\driver\\kage") || l.ends_with("/driver/kage")) continue;  // ours
         r.warnings.push_back(std::format(
-            "Autre pilote OpenVR enregistré : {} — à désactiver dans SteamVR pendant les sessions KAGÉ pour éviter un conflit de casque.",
+            "Autre pilote OpenVR enregistré : {} — normal si tu utilises aussi cette appli ; si SteamVR affiche le mauvais casque, "
+            "le désactiver dans SteamVR pendant les sessions KAGÉ.",
             d));
+    }
+    for (const auto& n : r.network) {
+        if (n.type != "Wi-Fi" || n.ssid.empty()) continue;
+        if (n.freqMHz && n.freqMHz < 3000)
+            r.warnings.push_back(std::format("Wi-Fi du PC en 2,4 GHz (« {} ») : trop lent et encombré pour la VR, passer en 5 GHz.", n.ssid));
+        if (n.signalPct && n.signalPct < 60)
+            r.warnings.push_back(std::format("Signal Wi-Fi du PC faible ({} %) : rapprocher le PC du routeur ou utiliser un câble.", n.signalPct));
+        if (n.txMbps && n.txMbps < 400)
+            r.warnings.push_back(std::format(
+                "Débit Wi-Fi négocié du PC bas ({} Mbit/s) : le streaming le partage avec le casque (2 passages par image).", n.txMbps));
+    }
     if (r.openxrActiveRuntime && lower(*r.openxrActiveRuntime).find("steamvr") == std::string::npos)
         r.warnings.push_back(std::format(
             "Runtime OpenXR actif : {} — les jeux OpenXR n'utiliseront SteamVR (donc KAGÉ) que si SteamVR est défini comme runtime OpenXR.",
@@ -368,6 +452,11 @@ std::string toText(const SystemReport& r) {
         for (size_t i = 0; i < n.ipv4.size(); ++i) ips += (i ? ", " : "") + n.ipv4[i];
         o += std::format("  - {} ({}), {} — {}\n", n.name, n.type,
                          n.linkSpeedBps ? std::format("{} Mbit/s", n.linkSpeedBps / 1000000) : "débit Non disponible", ips);
+        if (n.type == "Wi-Fi" && !n.ssid.empty())
+            o += std::format("      Wi-Fi « {} » : {}, {}, canal {}, signal {} %, débit négocié {} Mbit/s envoi / {} réception\n",
+                             n.ssid, n.phy.empty() ? "norme Non disponible" : n.phy,
+                             n.freqMHz ? std::format("{:.3f} GHz", n.freqMHz / 1000.0) : "bande Non disponible",
+                             n.channel, n.signalPct, n.txMbps, n.rxMbps);
     }
     if (!r.warnings.empty()) {
         o += "\nObservations :\n";

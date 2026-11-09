@@ -44,6 +44,10 @@ struct NetAdapterInfo {
     std::string type;  // "Ethernet", "Wi-Fi", "other"
     uint64_t linkSpeedBps = 0;
     std::vector<std::string> ipv4;
+    // Wi-Fi only (WLAN API), 0 / empty = Non disponible.
+    std::string guid;  // adapter GUID, to match the WLAN interface
+    std::string ssid, phy;
+    uint32_t channel = 0, freqMHz = 0, signalPct = 0, rxMbps = 0, txMbps = 0;
 };
 
 struct SystemReport {

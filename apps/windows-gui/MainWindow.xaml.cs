@@ -51,6 +51,7 @@ public partial class MainWindow : Window
         _timer.Start();
         Closed += (_, _) => StopService();
         InitFullBody();
+        CheckUpdateAtStartup();
         if (_hostExe == null) Log("kage-host.exe introuvable : compiler le projet (scripts\\build-host.ps1).");
         else StartService();  // the headset can find this PC as soon as the app is open
         Refresh();

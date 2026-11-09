@@ -61,11 +61,14 @@ bool AmfEncoder::init(ID3D11Device* device, bool hevc, uint32_t width, uint32_t 
     const AMFRate rate = AMFConstructRate(static_cast<amf_uint32>(fps + 0.5f), 1);
     // Two frames of VBV: keyframes/detail get room (sharper), bursts stay bounded.
     const amf_int64 vbv = static_cast<amf_int64>(2 * bps / fps);
+    // 0 speed, 1 balanced, 2 quality. kage-encbench (RX 6700 XT, 2832x1488): quality 6.3 ms,
+    // balanced 5.2 ms, speed 5.1 ms median at any fps -> balanced everywhere (latency first).
+    const int p = preset >= 0 ? preset : 1;
     if (hevc) {
         AMF_TRY(encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_USAGE, AMF_VIDEO_ENCODER_HEVC_USAGE_ULTRA_LOW_LATENCY));
-        // At <= 72 fps the frame budget allows the better BALANCED preset (sharper image).
         setOpt(encoder_, AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET,
-               fps <= 72.5f ? AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET_QUALITY : AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET_BALANCED);
+               p == 2 ? AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET_QUALITY
+                      : p == 1 ? AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET_BALANCED : AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET_SPEED);
         AMF_TRY(encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_FRAMESIZE, AMFConstructSize(width, height)));
         setOpt(encoder_, AMF_VIDEO_ENCODER_HEVC_FRAMERATE, rate);
         setOpt(encoder_, AMF_VIDEO_ENCODER_HEVC_LOWLATENCY_MODE, true);
@@ -96,7 +99,8 @@ bool AmfEncoder::init(ID3D11Device* device, bool hevc, uint32_t width, uint32_t 
     } else {
         AMF_TRY(encoder_->SetProperty(AMF_VIDEO_ENCODER_USAGE, AMF_VIDEO_ENCODER_USAGE_ULTRA_LOW_LATENCY));
         setOpt(encoder_, AMF_VIDEO_ENCODER_QUALITY_PRESET,
-               fps <= 72.5f ? AMF_VIDEO_ENCODER_QUALITY_PRESET_QUALITY : AMF_VIDEO_ENCODER_QUALITY_PRESET_BALANCED);
+               p == 2 ? AMF_VIDEO_ENCODER_QUALITY_PRESET_QUALITY
+                      : p == 1 ? AMF_VIDEO_ENCODER_QUALITY_PRESET_BALANCED : AMF_VIDEO_ENCODER_QUALITY_PRESET_SPEED);
         AMF_TRY(encoder_->SetProperty(AMF_VIDEO_ENCODER_FRAMESIZE, AMFConstructSize(width, height)));
         setOpt(encoder_, AMF_VIDEO_ENCODER_FRAMERATE, rate);
         setOpt(encoder_, AMF_VIDEO_ENCODER_LOWLATENCY_MODE, true);
