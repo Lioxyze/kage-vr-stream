@@ -39,6 +39,8 @@ public:
     uint8_t driverFoveation() const { return driverFoveation_; }
     bool micActive() const { return micActive_; }
     bool running() const { return running_; }
+    // Throughput measured by the PC's session-start Wi-Fi probe (0 = none: USB or not yet).
+    float probeMbps() const { return probeMbps_; }
 
     std::optional<kage::protocol::StreamConfig> config() const;
     void attachDecoder(VideoDecoder* d) { decoder_ = d; }  // after config, on the render thread
@@ -65,6 +67,7 @@ private:
     std::atomic<bool> micOn_{false}, micActive_{false};
     std::atomic<uint8_t> wantFoveation_{0}, driverFoveation_{0};
     std::atomic<bool> running_{false};
+    std::atomic<float> probeMbps_{0};
     std::atomic<VideoDecoder*> decoder_{nullptr};
 
     mutable std::mutex mutex_;

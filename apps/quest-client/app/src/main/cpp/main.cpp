@@ -271,6 +271,16 @@ struct FpsMode {
     float displayHz;
 };
 constexpr FpsMode kModes[] = {{45, 90.f}, {60, 120.f}, {72, 72.f}, {90, 90.f}, {120, 120.f}};  // 120: GPU + encoder permitting
+
+// Frame rate advised from the session-start Wi-Fi measure (heuristic, not validated by
+// image-quality measurements): the PC starts at 60 % of the measure; keep at least
+// ~0.45 Mbit per frame, so a weak Wi-Fi gets fewer but sharper frames. Never below 72.
+int adviseFps(float measuredMbps) {
+    const float usable = measuredMbps * 0.6f;
+    for (int fps : {120, 90})
+        if (usable >= 0.45f * fps) return fps;
+    return 72;
+}
 // Quality: render resolution scale (per axis) + max bitrate. Applied at the next SteamVR start
 // (the PC keeps the resolution for the whole SteamVR session).
 struct Quality {
@@ -355,6 +365,7 @@ public:
         loadLevel("res.txt", res_, static_cast<int>(std::size(kResScales)));
         loadLevel("fov.txt", fov_, static_cast<int>(std::size(kFovNames)));
         loadLevel("sharp.txt", sharp_, static_cast<int>(std::size(kSharpNames)));
+        if (std::ifstream wf(dataDir_ / "wifi.txt"); wf >> wifiMbps_) {}  // last Wi-Fi measure (lobby advice)
         // App-private storage: this headset's identity key and the PCs it trusts.
         auto id = kage::crypto::loadOrCreateKeyPair(dataDir_ / "client.key");
         if (!id) {
@@ -574,6 +585,11 @@ private:
 
     void updateStreaming(FrameContext& c) {
         sendTracking(c);
+        if (const float p = stream_.probeMbps(); p > 0 && p != wifiMbps_) {  // new session measure
+            wifiMbps_ = p;
+            std::ofstream(dataDir_ / "wifi.txt", std::ios::trunc) << p;
+            klog::info("wifi: measured {:.0f} Mbit/s, advised {} fps (playing {})", p, adviseFps(p), streamFps_);
+        }
         if (decoder_.latest(xr_.eglDisplay())) {
             frameMeta_ = stream_.meta(decoder_.frameIndex());
             // Self-calibrating prediction: the pose was predicted for trackingTimeUs, the frame
@@ -834,6 +850,13 @@ private:
             line(std::format("Décodage : {}   Images perdues : {}/s", ms(s.decodeMs), s.dropped));
             line(std::format("Latence de bout en bout (prédiction) : {:.1f} ms   {:.0f} Hz", predictionUs_ / 1000,
                              xr_.refreshRate()));
+            if (const float p = stream_.probeMbps(); p > 0) {
+                const int adv = adviseFps(p);
+                if (adv != streamFps_)
+                    line(std::format("Wi-Fi mesuré : {:.0f} Mbit/s, conseillé : {} i/s (à choisir dans le lobby)", p, adv), palette::kWarn);
+                else
+                    line(std::format("Wi-Fi mesuré : {:.0f} Mbit/s, {} i/s adapté", p, adv));
+            }
             return;
         }
         if (mode_ == Mode::Connecting && pairCode_) {
@@ -854,6 +877,10 @@ private:
             renderer_.text(m, W / 2 - 0.20f, y, 0.022f, h.rttMs >= 0 ? std::format("{:.1f} ms", h.rttMs) : "", palette::kCyan);
         }
         if (!status_.empty()) renderer_.text(m, left, -top + 0.035f, 0.02f, status_, palette::kWarn);
+        else if (wifiMbps_ > 0)
+            renderer_.text(m, left, -top + 0.035f, 0.02f,
+                           std::format("Dernier Wi-Fi mesuré : {:.0f} Mbit/s, conseillé : {} i/s", wifiMbps_, adviseFps(wifiMbps_)),
+                           adviseFps(wifiMbps_) == streamFps_ ? palette::kDim : palette::kWarn);
     }
 
     XrApp& xr_;
@@ -892,6 +919,7 @@ private:
     FrameContext ctx_;
     kp::VideoFrameMeta frameMeta_;
     int res_ = 0, fov_ = 0, sharp_ = 1;  // resolution, foveation, sharpening levels (menu)
+    float wifiMbps_ = 0;                 // last session-start Wi-Fi measure (wifi.txt)
     double predictionUs_ = 40'000;  // initial guess, self-calibrated while streaming
 };
 

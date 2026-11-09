@@ -16,6 +16,7 @@ using kage::monotonicMicros;
 void StreamClient::start(const kage::net::Endpoint& driver, const kp::StreamHello& hello,
                          const kage::crypto::KeyPair& identity, const kage::crypto::Key& hostKey) {
     stop();
+    probeMbps_ = 0;
     auto eph = kage::crypto::KeyPair::generate();  // fresh per session: forward secrecy
     if (!eph) {
         klog::error("stream: no randomness for the session key");
@@ -125,6 +126,7 @@ void StreamClient::loop() {
     auto sendProbe = [&] {
         probe.spanUs = static_cast<uint32_t>(probeLastUs - probeFirstUs);
         send(kp::Channel::Control, probe);
+        if (probe.spanUs) probeMbps_ = static_cast<float>(probe.bytes * 8.0 / probe.spanUs);
         klog::info("stream: Wi-Fi probe {} datagrams, {:.1f} Mbit/s", probe.received,
                    probe.spanUs ? probe.bytes * 8.0 / probe.spanUs : 0.0);
         probeOpen = false;
