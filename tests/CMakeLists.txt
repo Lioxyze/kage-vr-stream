@@ -13,3 +13,13 @@ kage_add_test(test_sync_telemetry)
 kage_add_test(test_loopback)
 set_tests_properties(test_loopback PROPERTIES LABELS integration TIMEOUT 30)
 kage_add_test(test_crypto)
+
+# Fake headset <-> real driver streaming server over UDP on this PC (Windows only).
+if(WIN32)
+    add_executable(test_stream_e2e test_stream_e2e.cpp ${CMAKE_SOURCE_DIR}/drivers/steamvr/src/stream_server.cpp)
+    target_include_directories(test_stream_e2e PRIVATE ${CMAKE_SOURCE_DIR}/drivers/steamvr/src ${CMAKE_SOURCE_DIR}/third_party/openvr)
+    target_link_libraries(test_stream_e2e PRIVATE kage::core ws2_32)
+    target_compile_options(test_stream_e2e PRIVATE /W3 /utf-8)
+    add_test(NAME test_stream_e2e COMMAND test_stream_e2e)
+    set_tests_properties(test_stream_e2e PROPERTIES LABELS integration TIMEOUT 60)
+endif()
