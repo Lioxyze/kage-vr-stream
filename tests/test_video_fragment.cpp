@@ -191,3 +191,21 @@ TEST(fec_corrupt_parity_rejected) {
     CHECK(!done);  // never rebuilt from a mismatched parity (no corrupt frame)
     CHECK(r.stats().fragmentsRecovered == 0);
 }
+
+TEST(slice_units_accepted_and_ordered) {
+    // Frame 3 in two slice units (ids 3*kMaxSlices + 0/1); the last one carries kFrameSliceLast.
+    auto s0 = makeFrame(9000, 1), s1 = makeFrame(5000, 2);
+    std::vector<std::vector<uint8_t>> a, b;
+    fragmentFrame(3 * kMaxSlices, 1, kFrameSliced | kFrameKeyframe, s0,
+                  [&](std::span<const uint8_t> p) { a.emplace_back(p.begin(), p.end()); }, kMaxVideoPayload, 8);
+    fragmentFrame(3 * kMaxSlices + 1, 1, kFrameSliced | kFrameSliceLast | kFrameKeyframe, s1,
+                  [&](std::span<const uint8_t> p) { b.emplace_back(p.begin(), p.end()); }, kMaxVideoPayload, 8);
+    FrameReassembler r;
+    std::vector<CompletedFrame> out;
+    for (auto& p : a) if (auto d = r.push(p)) out.push_back(std::move(*d));
+    for (auto& p : b) if (auto d = r.push(p)) out.push_back(std::move(*d));
+    CHECK(out.size() == 2);
+    CHECK(out.size() == 2 && out[0].data == s0 && out[1].data == s1);
+    CHECK(out.size() == 2 && (out[1].flags & kFrameSliceLast) && (out[0].flags & kFrameSliced));
+    CHECK(r.stats().fragmentsRejected == 0);
+}

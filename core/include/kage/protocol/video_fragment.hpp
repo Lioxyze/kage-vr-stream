@@ -35,8 +35,13 @@ enum VideoFrameFlags : uint8_t {
     // to group i % groups). fragmentIndex = group, fragmentOffset = number of groups.
     // One lost fragment per group is rebuilt without waiting for a keyframe.
     kFrameParity = 1u << 1,
+    // Slice units (kFeatureSliceUnits): frameIndex = frame * kMaxSlices + slice; each slice is
+    // reassembled on its own and sent as soon as encoded. Last slice of a frame: kFrameSliceLast.
+    kFrameSliced = 1u << 2,
+    kFrameSliceLast = 1u << 3,
 };
 
+inline constexpr uint32_t kMaxSlices = 8;
 inline constexpr uint32_t kMaxFrameSize = 8u * 1024u * 1024u;  // 8 MiB per encoded frame
 inline constexpr size_t kMaxVideoPayload =
     kMaxDatagram - PacketHeader::kSize - VideoFragmentHeader::kSize - 24 /* crypto::SecureSession::kOverhead */;

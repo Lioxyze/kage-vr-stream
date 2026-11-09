@@ -80,6 +80,19 @@ bool AmfEncoder::init(ID3D11Device* device, bool hevc, uint32_t width, uint32_t 
         setOpt(encoder_, AMF_VIDEO_ENCODER_HEVC_HEADER_INSERTION_MODE,
                AMF_VIDEO_ENCODER_HEVC_HEADER_INSERTION_MODE_IDR_ALIGNED);
         setOpt(encoder_, AMF_VIDEO_ENCODER_HEVC_QUERY_TIMEOUT, static_cast<amf_int64>(10));
+        if (wantSlices &&
+            encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_SLICES_PER_FRAME, static_cast<amf_int64>(kSlices)) == AMF_OK &&
+            encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_OUTPUT_MODE, AMF_VIDEO_ENCODER_HEVC_OUTPUT_MODE_SLICE) == AMF_OK)
+            slicesOn = true;
+        if (wantIntraRefresh) {
+            // The whole picture is refreshed in ~0.5 s: a lost frame heals without a keyframe.
+            const amf_int64 ctbs = ((width + 63) / 64) * ((height + 63) / 64);
+            const amf_int64 perSlot = std::max<amf_int64>(1, (ctbs + static_cast<amf_int64>(fps / 2)) / std::max(1, static_cast<int>(fps / 2)));
+            if (encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_INTRA_REFRESH_NUM_CTBS_PER_SLOT, perSlot) == AMF_OK) {
+                intraRefreshOn = true;
+                setOpt(encoder_, AMF_VIDEO_ENCODER_HEVC_NUM_GOPS_PER_IDR, static_cast<amf_int64>(0));  // no periodic keyframe spike
+            }
+        }
     } else {
         AMF_TRY(encoder_->SetProperty(AMF_VIDEO_ENCODER_USAGE, AMF_VIDEO_ENCODER_USAGE_ULTRA_LOW_LATENCY));
         setOpt(encoder_, AMF_VIDEO_ENCODER_QUALITY_PRESET,
@@ -95,11 +108,24 @@ bool AmfEncoder::init(ID3D11Device* device, bool hevc, uint32_t width, uint32_t 
         setOpt(encoder_, AMF_VIDEO_ENCODER_B_PIC_PATTERN, static_cast<amf_int64>(0));
         setOpt(encoder_, AMF_VIDEO_ENCODER_IDR_PERIOD, static_cast<amf_int64>(fps * 10));
         setOpt(encoder_, AMF_VIDEO_ENCODER_QUERY_TIMEOUT, static_cast<amf_int64>(10));
+        if (wantSlices &&
+            encoder_->SetProperty(AMF_VIDEO_ENCODER_SLICES_PER_FRAME, static_cast<amf_int64>(kSlices)) == AMF_OK &&
+            encoder_->SetProperty(AMF_VIDEO_ENCODER_OUTPUT_MODE, AMF_VIDEO_ENCODER_OUTPUT_MODE_SLICE) == AMF_OK)
+            slicesOn = true;
+        if (wantIntraRefresh) {
+            const amf_int64 mbs = ((width + 15) / 16) * ((height + 15) / 16);
+            const amf_int64 perSlot = std::max<amf_int64>(1, (mbs + static_cast<amf_int64>(fps / 2)) / std::max(1, static_cast<int>(fps / 2)));
+            if (encoder_->SetProperty(AMF_VIDEO_ENCODER_INTRA_REFRESH_NUM_MBS_PER_SLOT, perSlot) == AMF_OK) {
+                intraRefreshOn = true;
+                setOpt(encoder_, AMF_VIDEO_ENCODER_IDR_PERIOD, static_cast<amf_int64>(0));
+            }
+        }
     }
     AMF_TRY(encoder_->Init(amf::AMF_SURFACE_BGRA, static_cast<amf_int32>(width), static_cast<amf_int32>(height)));
-    log::info("AMF {} encoder ready: {}x{} @ {:.0f} Hz, {} Mbit/s CBR, ultra-low-latency, runtime {}.{}.{}",
-              hevc ? "HEVC" : "H.264", width, height, fps, kbps / 1000, runtimeVersion >> 48,
-              (runtimeVersion >> 32) & 0xFFFF, (runtimeVersion >> 16) & 0xFFFF);
+    log::info("AMF {} encoder ready: {}x{} @ {:.0f} Hz, {} Mbit/s CBR, ultra-low-latency, slices {}, intra refresh {}, runtime {}.{}.{}",
+              hevc ? "HEVC" : "H.264", width, height, fps, kbps / 1000, slicesOn ? kSlices : 0,
+              intraRefreshOn ? "on" : "off", runtimeVersion >> 48, (runtimeVersion >> 32) & 0xFFFF,
+              (runtimeVersion >> 16) & 0xFFFF);
     return true;
 }
 
@@ -158,6 +184,20 @@ std::optional<EncodedFrame> AmfEncoder::poll() {
     if (data->GetProperty(kPropSubmitUs, &v) == AMF_OK) f.submitUs = static_cast<uint64_t>(v);
     if (data->GetProperty(hevc_ ? AMF_VIDEO_ENCODER_HEVC_OUTPUT_DATA_TYPE : AMF_VIDEO_ENCODER_OUTPUT_DATA_TYPE, &v) == AMF_OK)
         f.keyframe = hevc_ ? v == AMF_VIDEO_ENCODER_HEVC_OUTPUT_DATA_TYPE_IDR : v == AMF_VIDEO_ENCODER_OUTPUT_DATA_TYPE_IDR;
+    if (slicesOn &&
+        data->GetProperty(hevc_ ? AMF_VIDEO_ENCODER_HEVC_OUTPUT_BUFFER_TYPE : AMF_VIDEO_ENCODER_OUTPUT_BUFFER_TYPE, &v) == AMF_OK) {
+        // SLICE = more to come for this frame; SLICE_LAST / FRAME = frame complete.
+        f.slice = sliceIdx_;
+        f.lastSlice = v != AMF_VIDEO_ENCODER_HEVC_OUTPUT_BUFFER_TYPE_SLICE;  // same values for H.264
+        sliceIdx_ = f.lastSlice ? 0 : static_cast<uint8_t>(sliceIdx_ + 1);
+        if (f.slice == 0) {  // later slices may not carry the frame's properties
+            sliceFrame_ = f;
+        } else {
+            f.frameIndex = sliceFrame_.frameIndex;
+            f.submitUs = sliceFrame_.submitUs;
+            f.keyframe = sliceFrame_.keyframe;
+        }
+    }
     if (buffer) {
         const auto* p = static_cast<const uint8_t*>(buffer->GetNative());
         f.data.assign(p, p + buffer->GetSize());

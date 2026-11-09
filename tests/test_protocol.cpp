@@ -263,3 +263,9 @@ TEST(fuzz_random_inputs_do_not_crash) {
 }
 
 KT_MAIN()
+
+TEST(stream_features_roundtrip_and_unknown_bits) {
+    CHECK(roundtrip(StreamFeatures{kFeatureSliceUnits | kFeatureIntraRefresh}).flags ==
+          (kFeatureSliceUnits | kFeatureIntraRefresh));
+    CHECK(roundtrip(StreamFeatures{0xFF}).flags == 0xFF);  // future bits pass through, ignored by users
+}

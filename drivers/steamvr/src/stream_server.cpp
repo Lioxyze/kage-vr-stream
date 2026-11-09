@@ -112,6 +112,7 @@ void StreamServer::recvLoop() {
             lastRecvUs_ = monotonicMicros();
             encodeMessage(cfg, payload);
             send(Channel::Control, payload);
+            sendFeatures();
             continue;
         }
         lastRecvUs_ = monotonicMicros();
@@ -123,6 +124,9 @@ void StreamServer::recvLoop() {
             if (onCalibrateFullBody) onCalibrateFullBody();
         } else if (auto* s = std::get_if<ClientStats>(&*msg)) {
             if (onStats) onStats(*s);
+            sendFeatures();  // cheap (1 byte), keeps the headset in sync once the encoder is up
+        } else if (auto* fe = std::get_if<StreamFeatures>(&*msg)) {
+            clientFeatures_ = fe->flags;
         } else if (auto* p = std::get_if<Ping>(&*msg)) {
             Pong pong{p->pingId, p->clientSendUs, lastRecvUs_.load(), monotonicMicros()};
             encodeMessage(pong, payload);
@@ -171,6 +175,7 @@ void StreamServer::handleSecureHello(const SecureHello& sh, const net::Endpoint&
         std::lock_guard l(mutex_);
         client_ = from;
         fec_ = (from.ipv4 >> 24) != 127;  // USB bridge (loopback) never loses packets
+        clientFeatures_ = 0;  // the headset re-announces its features in this session
         log::info("stream: encrypted session with {} established, Wi-Fi priority {}", from.toString(),
                   sock_.setLowLatencyPriority(from) ? "on" : "unavailable");
     }
@@ -183,16 +188,34 @@ void StreamServer::handleSecureHello(const SecureHello& sh, const net::Endpoint&
 }
 
 void StreamServer::sendVideo(uint32_t frameIndex, bool keyframe, const VideoFrameMeta& meta,
-                             std::span<const uint8_t> bitstream) {
-    frameBuf_.clear();
-    encodeFrameMeta(meta, frameBuf_);
+                             std::span<const uint8_t> bitstream, uint8_t slice, bool lastSlice) {
+    if (slice != 0 && slice != nextSlice_) {  // a slice went missing on the PC side: skip the frame
+        nextSlice_ = 0;
+        return;
+    }
+    nextSlice_ = lastSlice ? 0 : static_cast<uint8_t>(slice + 1);
+    const bool units = (activeFeatures() & kFeatureSliceUnits) != 0;
+    if (slice == 0) frameBuf_.clear();
+    if (slice == 0 || units) {
+        if (units) frameBuf_.clear();
+        if (slice == 0) encodeFrameMeta(meta, frameBuf_);  // the meta travels with the first slice
+    }
     frameBuf_.insert(frameBuf_.end(), bitstream.begin(), bitstream.end());
+    if (!units && !lastSlice) return;  // older headset: slices are joined into one frame
+    uint8_t flags = keyframe ? kFrameKeyframe : 0;
+    uint32_t unit = frameIndex;
+    if (units) {
+        if (slice >= kMaxSlices) return;  // never happens with the encoder's 4 slices
+        unit = frameIndex * kMaxSlices + slice;
+        flags |= kFrameSliced | (lastSlice ? kFrameSliceLast : 0);
+    }
     // Pacing: a whole frame sent back-to-back overflows Wi-Fi queues (losses, latency
     // spikes). Spread it at 4x the video bitrate (>= 250 Mbit/s): a few ms per frame.
+    // The pacing clock runs across slices so back-to-back slices stay spread too.
     const double bps = std::max(250e6, 4.0 * pacingKbps_.load() * 1000.0);
-    const uint64_t t0 = monotonicMicros();
+    const uint64_t t0 = std::max(monotonicMicros(), paceUntilUs_);
     size_t sent = 0;
-    fragmentFrame(frameIndex, meta.trackingTimeUs, keyframe ? kFrameKeyframe : 0, frameBuf_,
+    fragmentFrame(unit, meta.trackingTimeUs, flags, frameBuf_,
                   [&](std::span<const uint8_t> p) {
                       const uint64_t due = t0 + static_cast<uint64_t>(sent * 8 * 1e6 / bps);
                       while (monotonicMicros() < due) std::this_thread::yield();
@@ -200,6 +223,18 @@ void StreamServer::sendVideo(uint32_t frameIndex, bool keyframe, const VideoFram
                       sent += p.size() + PacketHeader::kSize + crypto::SecureSession::kOverhead;
                   },
                   kMaxVideoPayload, fec_ ? kFecGroup : 0);
+    paceUntilUs_ = t0 + static_cast<uint64_t>(sent * 8 * 1e6 / bps);
+}
+
+uint8_t StreamServer::activeFeatures() const {
+    // Intra refresh is the encoder's; slice units also need a headset that understands them.
+    return encoderFeatures_.load() & (kFeatureIntraRefresh | clientFeatures_.load());
+}
+
+void StreamServer::sendFeatures() {
+    std::vector<uint8_t> payload;
+    encodeMessage(StreamFeatures{activeFeatures()}, payload);
+    send(Channel::Control, payload);
 }
 
 void StreamServer::sendHaptics(const Haptics& hp) {

@@ -110,6 +110,7 @@ MessageType typeOf(const Message& m) {
                           [](const SecureHello&) { return MessageType::SecureHello; },
                           [](const SecureAccept&) { return MessageType::SecureAccept; },
                           [](const CalibrateFullBody&) { return MessageType::CalibrateFullBody; },
+                          [](const StreamFeatures&) { return MessageType::StreamFeatures; },
                       },
                       m);
 }
@@ -166,6 +167,7 @@ void encodeMessage(const Message& m, std::vector<uint8_t>& out) {
                        w.bytes(c.clientEphemeral);
                    },
                    [&](const CalibrateFullBody&) {},
+                   [&](const StreamFeatures& f) { w.u8(f.flags); },
                    [&](const SecureAccept& c) {
                        w.bytes(c.hostEphemeral);
                        w.bytes(c.confirm);
@@ -317,6 +319,12 @@ std::optional<Message> decodeMessage(std::span<const uint8_t> payload) {
         case MessageType::CalibrateFullBody:
             result = CalibrateFullBody{};
             break;
+        case MessageType::StreamFeatures: {
+            StreamFeatures f;
+            r.u8(f.flags);  // unknown bits ignored: future features stay compatible
+            result = f;
+            break;
+        }
         case MessageType::SecureAccept: {
             SecureAccept c;
             readKey(r, c.hostEphemeral);

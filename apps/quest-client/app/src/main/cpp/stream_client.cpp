@@ -110,10 +110,15 @@ void StreamClient::loop() {
     kp::FrameReassembler reasm;
     bool waitKey = true;
     uint64_t lastHello = 0, lastPing = 0, lastIdr = 0, lastStats = monotonicMicros();
-    uint32_t pingId = 1, frames = 0, dropped = 0;
+    uint32_t pingId = 1, frames = 0, dropped = 0, statReports = 0;
     uint64_t bytes = 0, netUsSum = 0, netCount = 0;
     std::array<uint64_t, 64> pingSent{};
     uint64_t lastDropped = 0;
+    uint8_t driverFeatures = 0;  // StreamFeatures active on the PC
+    std::vector<uint8_t> sliceBuf;  // slices of the frame being joined (kFrameSliced)
+    uint32_t sliceFrame = 0, sliceNext = 0;  // sliceNext = expected slice (0 = none in progress)
+    bool sliceKey = false;
+    const kp::StreamFeatures myFeatures{kp::kFeatureSliceUnits | kp::kFeatureIntraRefresh};
 
     while (running_) {
         const uint64_t now = monotonicMicros();
@@ -121,6 +126,7 @@ void StreamClient::loop() {
             send(kp::Channel::Control, kp::SecureHello{identity_.pub, ephemeral_.pub});
             lastHello = now;
         } else if (secured_ && !config() && now - lastHello > 250'000) {
+            send(kp::Channel::Control, myFeatures);  // before the hello: known when the PC answers
             send(kp::Channel::Control, hello_);
             lastHello = now;
         }
@@ -129,7 +135,7 @@ void StreamClient::loop() {
             send(kp::Channel::Control, kp::Ping{pingId++, now});
             lastPing = now;
         }
-        if (now - lastStats > 1'000'000) {
+        if (now - lastStats > 250'000) {  // 4 reports/s: the PC adapts its bitrate 4x faster
             kp::ClientStats cs;
             cs.framesReceived = frames;
             cs.framesDropped = dropped;
@@ -138,8 +144,10 @@ void StreamClient::loop() {
             cs.networkUsAvg = netCount ? static_cast<uint32_t>(netUsSum / netCount) : 0;
             cs.rttUs = clock_.hasEstimate() ? static_cast<uint32_t>(clock_.lastRttUs()) : 0;
             send(kp::Channel::Control, cs);
-            klog::info("stream: {} frames {} dropped {} fec-recovered (total) {:.1f} Mbit/s rtt {:.1f} ms decode {:.2f} ms",
-                       frames, dropped, reasm.stats().fragmentsRecovered, bytes * 8 / 1e6, cs.rttUs / 1000.0,
+            if (statReports % 4 == 0) send(kp::Channel::Control, myFeatures);  // in case it was lost
+            if (++statReports % 4 == 0)
+            klog::info("stream: {} frames/250ms {} dropped {} fec-recovered (total) {:.1f} Mbit/s rtt {:.1f} ms decode {:.2f} ms",
+                       frames, dropped, reasm.stats().fragmentsRecovered, bytes * 8 / ((now - lastStats) / 1e6) / 1e6, cs.rttUs / 1000.0,
                        cs.decodeUsAvg / 1000.0);
             {
                 std::lock_guard l(mutex_);
@@ -193,14 +201,41 @@ void StreamClient::loop() {
                 lastDropped = reasm.stats().framesDropped;
             }
             if (reasm.keyframeNeeded()) {
-                waitKey = true;  // references are broken: never decode on top of a hole
-                if (recvUs - lastIdr > 100'000) {
-                    send(kp::Channel::Control, kp::IdrRequest{0});
-                    lastIdr = recvUs;
+                // With intra refresh the PC heals the picture in ~0.5 s: keep decoding (no freeze,
+                // no keyframe spike). Otherwise never decode on top of a hole: wait for a keyframe.
+                if (!(driverFeatures & kp::kFeatureIntraRefresh)) {
+                    waitKey = true;
+                    if (recvUs - lastIdr > 100'000) {
+                        send(kp::Channel::Control, kp::IdrRequest{0});
+                        lastIdr = recvUs;
+                    }
                 }
                 reasm.acknowledgeKeyframeRequest();
             }
             if (!frame) continue;
+            if (frame->flags & kp::kFrameSliced) {  // join the slices of one frame, in order
+                const uint32_t fi = frame->frameIndex / kp::kMaxSlices, sl = frame->frameIndex % kp::kMaxSlices;
+                if (sl == 0) {
+                    sliceBuf = std::move(frame->data);
+                    sliceFrame = fi;
+                    sliceNext = 1;
+                    sliceKey = frame->flags & kp::kFrameKeyframe;
+                } else if (sliceNext == sl && sliceFrame == fi) {
+                    sliceBuf.insert(sliceBuf.end(), frame->data.begin(), frame->data.end());
+                    ++sliceNext;
+                } else {  // a slice of this frame is missing
+                    if (sliceNext) ++dropped;
+                    sliceNext = 0;
+                    if (!(driverFeatures & kp::kFeatureIntraRefresh)) waitKey = true;
+                    continue;
+                }
+                if (!(frame->flags & kp::kFrameSliceLast)) continue;
+                frame->frameIndex = fi;
+                frame->data = std::move(sliceBuf);
+                frame->flags = sliceKey ? kp::kFrameKeyframe : 0;
+                sliceBuf.clear();
+                sliceNext = 0;
+            }
             kp::VideoFrameMeta meta;
             if (!kp::decodeFrameMeta(frame->data, meta)) continue;
             const bool key = frame->flags & kp::kFrameKeyframe;
@@ -251,6 +286,10 @@ void StreamClient::loop() {
             config_ = *c;
         } else if (auto* p = std::get_if<kp::Pong>(&*msg)) {
             if (pingSent[p->pingId % 64] == p->clientSendUs) clock_.addSample(p->clientSendUs, p->hostRecvUs, p->hostSendUs, recvUs);
+        } else if (auto* fe = std::get_if<kp::StreamFeatures>(&*msg)) {
+            if (fe->flags != driverFeatures) klog::info("stream: PC features slices {} intra-refresh {}",
+                                                        (fe->flags & kp::kFeatureSliceUnits) != 0, (fe->flags & kp::kFeatureIntraRefresh) != 0);
+            driverFeatures = fe->flags;
         } else if (auto* hp = std::get_if<kp::Haptics>(&*msg)) {
             std::lock_guard l(mutex_);
             if (haptics_.size() < 16) haptics_.push_back(*hp);

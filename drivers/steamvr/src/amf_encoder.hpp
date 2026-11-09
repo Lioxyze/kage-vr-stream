@@ -33,6 +33,9 @@ private:
     amf::AMFComponent* encoder_ = nullptr;
     bool hevc_ = true;
     float fps_ = 72;
+    static constexpr int kSlices = 4;
+    uint8_t sliceIdx_ = 0;  // index of the next slice output of the current frame
+    EncodedFrame sliceFrame_;  // properties of slice 0 (data unused)
 };
 
 }  // namespace kage::driver

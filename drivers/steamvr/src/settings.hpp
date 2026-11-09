@@ -18,6 +18,10 @@ struct Settings {
     std::string encoder = "auto";  // auto | amf | gpu | software
     std::string codec = "auto";    // auto (HEVC) | hevc | h264
     uint32_t maxBitrateKbps = 0;   // 0 = headset choice
+    // After a lost frame: "refresh" = the encoder heals the picture progressively (no keyframe
+    // spike, no freeze; brief smearing possible), "idr" = wait for a keyframe (old behaviour).
+    std::string recovery = "refresh";
+    bool slices = true;  // send each slice as soon as it is encoded
 };
 
 inline Settings loadSettings() {
@@ -34,6 +38,8 @@ inline Settings loadSettings() {
         std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         if (k == "encoder") s.encoder = v;
         else if (k == "codec") s.codec = v;
+        else if (k == "recovery") s.recovery = v;
+        else if (k == "slices") s.slices = v != "0" && v != "off" && v != "false";
         else if (k == "maxbitrate") s.maxBitrateKbps = static_cast<uint32_t>(std::strtoul(v.c_str(), nullptr, 10)) * 1000;
     }
     return s;

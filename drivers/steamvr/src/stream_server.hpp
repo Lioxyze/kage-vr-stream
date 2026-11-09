@@ -38,7 +38,10 @@ public:
     bool clientActive() const;  // a packet was received in the last 2 s
 
     void sendVideo(uint32_t frameIndex, bool keyframe, const protocol::VideoFrameMeta& meta,
-                   std::span<const uint8_t> bitstream);
+                   std::span<const uint8_t> bitstream, uint8_t slice = 0, bool lastSlice = true);
+    // Features the encoder really enabled (kFeature*); combined with what the headset supports.
+    void setEncoderFeatures(uint8_t f) { encoderFeatures_ = f; }
+    uint8_t activeFeatures() const;
     void sendHaptics(const protocol::Haptics& h);
     void setPacingKbps(uint32_t kbps) { pacingKbps_ = kbps; }
     // Raw PCM on the audio channel: u32 sample rate (LE) + interleaved stereo int16.
@@ -48,6 +51,7 @@ private:
     void recvLoop();
     void handleSecureHello(const protocol::SecureHello& h, const net::Endpoint& from);
     void send(protocol::Channel ch, std::span<const uint8_t> payload);
+    void sendFeatures();
     protocol::StreamConfig makeConfig(const protocol::StreamHello& h) const;
 
     net::UdpSocket sock_;
@@ -61,6 +65,9 @@ private:
     std::atomic<uint32_t> pacingKbps_{60000};
     static constexpr unsigned kFecGroup = 8;  // 1 parity per 8 data datagrams (+12.5 % traffic)
     std::atomic<bool> fec_{true};  // FEC parity on Wi-Fi; off on the USB bridge (loopback, lossless)
+    std::atomic<uint8_t> clientFeatures_{0}, encoderFeatures_{0};
+    uint64_t paceUntilUs_ = 0;  // encoder thread only
+    uint8_t nextSlice_ = 0;
     std::mutex sendMutex_;  // also guards session_ (counter) and the send buffers
     crypto::KeyPair hostKey_;
     std::filesystem::path pairedFile_;

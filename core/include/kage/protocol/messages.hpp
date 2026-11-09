@@ -36,6 +36,7 @@ enum class MessageType : uint8_t {
     Haptics = 43,         // driver -> client
     ClientStats = 44,     // client -> driver, ~1 Hz, feeds bitrate control
     CalibrateFullBody = 45,  // client -> driver: start the Rift CV1 calibration (15 s)
+    StreamFeatures = 46,  // both ways: optional features (client: supported, driver: active)
     PairRequest = 32,     // client -> kage-host, repeated while the user compares the code
     PairReply = 33,
     SecureHello = 50,     // client -> driver: static + ephemeral X25519 keys (clear)
@@ -197,6 +198,16 @@ struct StreamConfig {
     uint32_t bitrateKbps = 0;
 };
 
+// Optional streaming features, negotiated without breaking older builds (an unknown
+// message type is ignored). Client -> driver: what it supports; driver -> client: what is on.
+enum FeatureMask : uint8_t {
+    kFeatureSliceUnits = 1u << 0,    // video slices sent as soon as encoded (VideoFragment kFrameSliced)
+    kFeatureIntraRefresh = 1u << 1,  // encoder heals losses progressively: no keyframe wait
+};
+struct StreamFeatures {
+    uint8_t flags = 0;
+};
+
 struct IdrRequest {
     uint32_t lastFrameIndex = 0;
 };
@@ -230,7 +241,7 @@ bool decodeFrameMeta(std::span<const uint8_t> in, VideoFrameMeta& m);
 
 using Message = std::variant<DiscoveryProbe, DiscoveryAnnounce, Ping, Pong, Heartbeat, Disconnect, TrackingState,
                              ConnectRequest, ConnectReply, StreamHello, StreamConfig, IdrRequest, Haptics, ClientStats,
-                             PairRequest, PairReply, SecureHello, SecureAccept, CalibrateFullBody>;
+                             PairRequest, PairReply, SecureHello, SecureAccept, CalibrateFullBody, StreamFeatures>;
 
 MessageType typeOf(const Message& m);
 

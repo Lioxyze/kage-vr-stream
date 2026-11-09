@@ -135,7 +135,7 @@ std::optional<CompletedFrame> FrameReassembler::push(std::span<const uint8_t> pa
     const bool isParity = (h.flags & kFrameParity) != 0;
     h.flags &= static_cast<uint8_t>(~kFrameParity);
     const bool common = r.ok() && h.frameSize > 0 && h.frameSize <= kMaxFrameSize && h.fragmentCount > 0 &&
-                        !data.empty() && (h.flags & ~kFrameKeyframe) == 0;
+                        !data.empty() && (h.flags & ~(kFrameKeyframe | kFrameSliced | kFrameSliceLast)) == 0;
     // Parity: fragmentOffset = groups, fragmentIndex = group; its length is the fragment size,
     // which must cover the frame with fragmentCount fragments.
     const bool valid =

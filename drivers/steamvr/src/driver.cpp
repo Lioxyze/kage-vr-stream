@@ -244,9 +244,14 @@ public:
         if (st.encoder == "auto" || st.encoder == "gpu") order.push_back(std::make_unique<kage::driver::MfEncoder>(true, false));
         if (st.encoder == "auto" || st.encoder == "software") order.push_back(std::make_unique<kage::driver::MfEncoder>(false, true));
         for (auto& e : order) {
+            e->wantSlices = st.slices;
+            e->wantIntraRefresh = st.recovery == "refresh";
             if (e->init(gpu_.device(), hevc, cfg_.width, cfg_.height, cfg_.refreshHz, bitrateKbps_)) {
                 encoder_ = std::move(e);
-                klog::info("encoder: {}", encoder_->name());
+                net_.setEncoderFeatures(static_cast<uint8_t>((encoder_->slicesOn ? kp::kFeatureSliceUnits : 0) |
+                                                                (encoder_->intraRefreshOn ? kp::kFeatureIntraRefresh : 0)));
+                klog::info("encoder: {} (slices {}, intra refresh {})", encoder_->name(), encoder_->slicesOn ? "on" : "off",
+                           encoder_->intraRefreshOn ? "on" : "off");
                 return true;
             }
             e->shutdown();
@@ -318,8 +323,13 @@ public:
         {
             std::lock_guard l(poseMutex_);
             pose_ = makePose(t.head, t.headFlags & kp::kPoseValid, true);
-            lastTrackingUs_ = t.sampleTimeUs;
+            // The frame carries the time the pose was predicted FOR: the headset compares it with
+            // the real display time and calibrates its prediction on that (the sample time would
+            // add the headset's own display latency, i.e. over-predict by ~20 ms).
+            lastTrackingUs_ = t.predictedDisplayTimeUs ? t.predictedDisplayTimeUs : t.sampleTimeUs;
         }
+        if (t.predictedDisplayTimeUs > t.sampleTimeUs)
+            predictionUs_ = static_cast<uint32_t>(std::min<uint64_t>(t.predictedDisplayTimeUs - t.sampleTimeUs, 1'000'000));
         vr::VRServerDriverHost()->TrackedDevicePoseUpdated(id_, pose_, sizeof(vr::DriverPose_t));
     }
     void requestIdr() { idr_ = true; }
@@ -333,35 +343,48 @@ public:
         const uint64_t enc = encoded_.load();
         const uint32_t sentDelta = static_cast<uint32_t>(enc - lastEncoded_);
         lastEncoded_ = enc;
-        // Baseline = lowest per-second transit seen (0 = no frame in that report: ignored).
+        // Reports come every 250 ms (new headsets) or 1 s (old ones): every rule uses the
+        // real interval, so both behave the same per second.
+        const uint64_t now = kage::monotonicMicros();
+        const uint64_t dt = lastReportUs_ ? std::clamp<uint64_t>(now - lastReportUs_, 100'000, 2'000'000) : 1'000'000;
+        lastReportUs_ = now;
+        if (!firstReportUs_) firstReportUs_ = now;
+        const double dts = dt / 1e6;
+        // Baseline = lowest transit seen (0 = no frame in that report: ignored).
         if (net && (bestNetUs_ == 0 || net < bestNetUs_)) bestNetUs_ = net;
-        if (bestNetUs_) bestNetUs_ += 50;  // slowly forget an old optimum (route/channel changes)
-        // Wi-Fi has isolated latency spikes unrelated to our rate: queueing delay must last 2 s.
-        delayStrikes_ = (net && bestNetUs_ && net > bestNetUs_ + 10000) ? delayStrikes_ + 1 : 0;
+        if (bestNetUs_) bestNetUs_ += static_cast<uint32_t>(50 * dts);  // slowly forget an old optimum
+        // Wi-Fi has isolated latency spikes unrelated to our rate: a mild delay must last 2 s.
+        delayUs_ = (net && bestNetUs_ && net > bestNetUs_ + 10000) ? delayUs_ + dt : 0;
         // A large queueing delay (> 25 ms over the best) is acted on at once: the Wi-Fi queue
-        // only drains if we send less, and waiting one more second is a second of lag.
+        // only drains if we send less.
         const bool bigDelay = net && bestNetUs_ && net > bestNetUs_ + 25000;
-        const bool congested = s.framesDropped > 0 || s.framesReceived + 5 < sentDelta ||
-                               delayStrikes_ >= 2 || bigDelay;
+        const bool loss = s.framesDropped > 0 || s.framesReceived + std::max(2.0, 5 * dts) < sentDelta;
+        const bool congested = loss || delayUs_ >= 2'000'000 || bigDelay;
         uint32_t br = bitrateKbps_;
-        if (++reports_ <= 5) {
+        if (now - firstReportUs_ < 5'000'000) {
             // SteamVR start-up (shader compiles, dashboard loading) causes transient stalls: ignore.
         } else if (congested) {
-            const bool loss = s.framesDropped > 0 || s.framesReceived + 5 < sentDelta;
-            const uint32_t floor = loss ? kMinKbps : std::min(kDelayFloorKbps, br);
-            br = std::max<uint32_t>(floor, br * 3 / 4);
-            calm_ = -2;  // hold 2 s before probing again
-        } else if (++calm_ >= 1) {
-            br = std::min<uint32_t>(cfg_.bitrateKbps, br + br / 10);
+            // At most one cut per 400 ms: the effect of a cut needs a moment to show.
+            if (now - lastCutUs_ >= 400'000) {
+                const uint32_t floor = loss ? kMinKbps : std::min(kDelayFloorKbps, br);
+                br = std::max<uint32_t>(floor, br * 3 / 4);
+                lastCutUs_ = now;
+            }
+            holdUntilUs_ = now + 2'000'000;  // hold 2 s before probing again
+        } else if (now >= holdUntilUs_) {
+            br = std::min<uint32_t>(cfg_.bitrateKbps, br + static_cast<uint32_t>(br * 0.10 * dts));  // +10 %/s
         }
         if (br != bitrateKbps_) {
             bitrateKbps_ = br;
             pendingBitrate_ = br;
         }
-        writeStats(s, br);
-        klog::info("client: {} fps, {} lost, decode {:.1f} ms, transit {:.1f} ms (best {:.1f}), rtt {:.1f} ms -> {} Mbit/s{}",
-                   s.framesReceived, s.framesDropped, s.decodeUsAvg / 1000.0, net / 1000.0, bestNetUs_ / 1000.0,
-                   s.rttUs / 1000.0, br / 1000, congested ? " (congestion)" : "");
+        writeStats(s, br, s.framesReceived / dts);
+        if (congested || now - lastLogUs_ >= 1'000'000) {
+            lastLogUs_ = now;
+            klog::info("client: {:.0f} fps, {} lost, decode {:.1f} ms, transit {:.1f} ms (best {:.1f}), rtt {:.1f} ms -> {} Mbit/s{}",
+                       s.framesReceived / dts, s.framesDropped, s.decodeUsAvg / 1000.0, net / 1000.0,
+                       bestNetUs_ / 1000.0, s.rttUs / 1000.0, br / 1000, congested ? " (congestion)" : "");
+        }
     }
 
     // IVRDisplayComponent -----------------------------------------------------
@@ -455,17 +478,17 @@ public:
 
 private:
     // Live metrics for the Windows GUI (%LOCALAPPDATA%\KageVR\stats.json, rewritten each second).
-    void writeStats(const kp::ClientStats& s, uint32_t br) {
+    void writeStats(const kp::ClientStats& s, uint32_t br, double fps) {
         wchar_t local[MAX_PATH];
         if (!GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH)) return;
         const std::wstring dir = std::wstring(local) + L"\\KageVR\\";
         const std::string json = std::format(
             "{{\"timeMs\":{},\"fps\":{},\"lost\":{},\"decodeMs\":{:.2f},\"transitMs\":{:.2f},\"rttMs\":{:.2f},"
             "\"encodeMs\":{:.2f},\"bitrateMbps\":{:.1f},\"codec\":\"{}\",\"width\":{},\"height\":{},\"refreshHz\":{:.0f},"
-            "\"predictionMs\":null}}",
-            GetTickCount64(), s.framesReceived, s.framesDropped, s.decodeUsAvg / 1000.0, s.networkUsAvg / 1000.0,
+            "\"predictionMs\":{:.1f}}}",
+            GetTickCount64(), std::lround(fps), s.framesDropped, s.decodeUsAvg / 1000.0, s.networkUsAvg / 1000.0,
             s.rttUs / 1000.0, encodeUsAvg_.load() / 1000.0, br / 1000.0, cfg_.codec == kp::kCodecHEVC ? "HEVC" : "H.264",
-            cfg_.width, cfg_.height, cfg_.refreshHz);
+            cfg_.width, cfg_.height, cfg_.refreshHz, predictionUs_.load() / 1000.0);
         if (FILE* f = _wfopen((dir + L"stats.tmp").c_str(), L"wb")) {
             fwrite(json.data(), 1, json.size(), f);
             fclose(f);
@@ -473,15 +496,16 @@ private:
         }
     }
     std::atomic<uint32_t> encodeUsAvg_{0};
+    std::atomic<uint32_t> predictionUs_{0};  // how far ahead the headset predicts (GUI)
 
     static constexpr size_t kMetaRing = 16;
     static constexpr uint32_t kMinKbps = 10'000, kStartKbps = 60'000;
     // Delay alone (no lost frame) never pushes below this: on a jittery Wi-Fi the delay
     // stays high even at low rates, and cutting further only degrades the image.
     static constexpr uint32_t kDelayFloorKbps = 50'000;
-    uint32_t bitrateKbps_ = kStartKbps, bestNetUs_ = 0, delayStrikes_ = 0;
-    uint64_t lastEncoded_ = 0;  // network thread only
-    int calm_ = 0, reports_ = 0;
+    uint32_t bitrateKbps_ = kStartKbps, bestNetUs_ = 0;
+    uint64_t lastEncoded_ = 0;  // network thread only (rate controller state below too)
+    uint64_t lastReportUs_ = 0, firstReportUs_ = 0, delayUs_ = 0, lastCutUs_ = 0, holdUntilUs_ = 0, lastLogUs_ = 0;
     std::atomic<uint32_t> pendingBitrate_{0};
 
     void vsyncLoop() {
@@ -523,10 +547,11 @@ private:
                 std::lock_guard l(metaMutex_);
                 meta = metas_[f->frameIndex % kMetaRing];
             }
-            net_.sendVideo(static_cast<uint32_t>(f->frameIndex), f->keyframe, meta, f->data);
+            net_.sendVideo(static_cast<uint32_t>(f->frameIndex), f->keyframe, meta, f->data, f->slice, f->lastSlice);
+            bytes += f->data.size();
+            if (!f->lastSlice) continue;  // frame statistics once its last slice is out
             ++encoded_;
             ++frames;
-            bytes += f->data.size();
             encUsSum += now - f->submitUs;
             if (now - lastLog > 5'000'000) {
                 const double secs = (now - lastLog) / 1e6;
