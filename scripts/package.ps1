@@ -1,4 +1,4 @@
-# Builds everything and assembles a ready-to-use folder: dist\KageVR
+﻿# Builds everything and assembles a ready-to-use folder: dist\KageVR
 #   KageVR.exe (+ .NET files)  kage-host.exe  driver\kage\  KageVR-Quest.apk  LISEZMOI.txt
 # Usage: .\scripts\package.ps1 [-SkipBuild]
 param([switch]$SkipBuild)
@@ -14,8 +14,8 @@ if (-not $SkipBuild) {
     Push-Location "$root\apps\quest-client"; .\gradlew.bat assembleDebug -q; Pop-Location
 }
 # The packaged adb (started by kage-host) and SteamVR (loads the driver DLL) lock files.
-Get-Process adb -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$out*" } | Stop-Process -Force
-if (Get-Process vrserver -ErrorAction SilentlyContinue) { throw "Fermer SteamVR avant de créer le paquet (le pilote est en cours d'utilisation)." }
+Get-Process adb -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$out*" } | Stop-Process -Force; Start-Sleep -Milliseconds 800
+if (Get-Process vrserver -ErrorAction SilentlyContinue) { throw "Fermer SteamVR avant de crÃ©er le paquet (le pilote est en cours d'utilisation)." }
 if (Test-Path $out) { Remove-Item $out -Recurse -Force }
 New-Item -ItemType Directory -Force "$out\driver" | Out-Null
 Copy-Item "$root\build\gui\*" $out -Recurse
