@@ -30,12 +30,16 @@ n'est pas développeur. N'invente jamais de résultat : vérifie (journaux, comm
 - `driver.log` : journal du pilote SteamVR (encodeur choisi, fps, pertes, débit, micro). **À lire en premier.**
   Lignes `encoder: ...`, `client: N fps, X lost, decode, transit, rtt -> débit`, `video: fps, encode ms`.
 - `settings.ini` (onglet Réglages) : `encoder=auto|amf|gpu|software`, `codec=auto|h264`, `maxbitrate=<Mbit, 0=casque>`.
+  Avancé (à la main) : `recovery=refresh|idr` (refresh = après une perte l'image se répare en ~0,5 s sans gel ;
+  idr = ancien comportement, attente d'une image clé : à essayer si traînées/artefacts persistants), `slices=1|0`.
   Pris en compte au prochain lancement de SteamVR.
 - `mic_device.txt` : nom (partiel) de la sortie Windows où jouer le micro du casque (défaut : VB-CABLE « CABLE Input »).
 - Journal SteamVR : `C:\Program Files (x86)\Steam\logs\vrserver.txt` (chercher `kage`).
 - Journal casque : `adb\adb.exe logcat -d -s KageVR:*`
 
 ## Pannes connues → solution
+- **Menu du casque (lobby)** : images/s, qualité (débit), Réso 100–130 %, Fovéal (centre net, bords compressés),
+  Netteté 0–3. Réso/Fovéal pris en compte au prochain lancement de SteamVR. Bords flous = baisser Fovéal.
 - **Écran noir / pas d'image, `encoder: none available`** : onglet Réglages → codec **H.264**, encodeur
   « Carte graphique via Windows » ; si toujours rien → « Processeur ». Fermer SteamVR, reconnecter.
 - **Saccades / PC faible** : SteamVR → Paramètres → Vidéo → baisser la résolution ; dans le casque

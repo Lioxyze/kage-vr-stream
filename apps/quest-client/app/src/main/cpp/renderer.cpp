@@ -60,15 +60,33 @@ const char* kTextFs = R"(#version 300 es
 precision mediump float; uniform sampler2D uTex; uniform vec4 uColor; in vec2 vUv; out vec4 o;
 void main(){ float a = texture(uTex, vUv).r; o = vec4(pow(uColor.rgb, vec3(2.2)), uColor.a * a); })";
 const char* kVideoVs = R"(#version 300 es
-uniform vec4 uRect; out vec2 vUv;
+out highp vec2 vEye;  // position in this eye, 0..1, v = 0 at the top
 void main(){ vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
-  vUv = vec2(mix(uRect.x, uRect.z, p.x), mix(uRect.w, uRect.y, p.y));
+  vEye = vec2(p.x, 1.0 - p.y);
   gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); })";
+// uRect.xz = this eye's u range in the decoded texture. uFov = foveation a (1 = off): the PC
+// encoded eye position x = a*c + (1-a)*c^3 (c = 2e-1); invert it (Newton, exact at the edges).
+// uSharp = sharpening amount, clamped to the local min/max so edges get no halo.
 const char* kVideoFs = R"(#version 300 es
 #extension GL_OES_EGL_image_external_essl3 : require
-precision mediump float; uniform samplerExternalOES uTex; in vec2 vUv; out vec4 o;
+precision mediump float; uniform samplerExternalOES uTex; uniform highp vec4 uRect;
+uniform highp float uFov; uniform float uSharp; uniform highp vec2 uTexel; in highp vec2 vEye; out vec4 o;
 vec3 toLinear(vec3 c){ return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
-void main(){ o = vec4(toLinear(texture(uTex, vUv).rgb), 1.0); })";
+highp vec2 unwarp(highp vec2 x){
+  highp vec2 t = x * 2.0 - 1.0, c = t; highp float b = 1.0 - uFov;
+  for (int i = 0; i < 3; ++i) c -= (uFov * c + b * c * c * c - t) / (uFov + 3.0 * b * c * c);
+  return c * 0.5 + 0.5; }
+void main(){
+  highp vec2 e = uFov < 0.999 ? unwarp(vEye) : vEye;
+  highp vec2 uv = vec2(mix(uRect.x, uRect.z, e.x), e.y);
+  vec3 c = texture(uTex, uv).rgb;
+  if (uSharp > 0.0) {
+    vec3 n = texture(uTex, uv + vec2(0.0, -uTexel.y)).rgb, s = texture(uTex, uv + vec2(0.0, uTexel.y)).rgb;
+    vec3 w = texture(uTex, uv + vec2(-uTexel.x, 0.0)).rgb, ea = texture(uTex, uv + vec2(uTexel.x, 0.0)).rgb;
+    vec3 mn = min(c, min(min(n, s), min(w, ea))), mx = max(c, max(max(n, s), max(w, ea)));
+    c = clamp(c + uSharp * (c - (n + s + w + ea) * 0.25) * 2.0, mn, mx);
+  }
+  o = vec4(toLinear(c), 1.0); })";
 
 int latin1(std::string_view s, size_t& i) {
     const auto c = static_cast<unsigned char>(s[i++]);
@@ -92,6 +110,9 @@ bool Renderer::init() {
     tMvp_ = glGetUniformLocation(textProg_, "uMvp");
     tColor_ = glGetUniformLocation(textProg_, "uColor");
     vRect_ = glGetUniformLocation(videoProg_, "uRect");
+    vFov_ = glGetUniformLocation(videoProg_, "uFov");
+    vSharp_ = glGetUniformLocation(videoProg_, "uSharp");
+    vTexel_ = glGetUniformLocation(videoProg_, "uTexel");
 
     static const float cube[] = {
         -.5f, -.5f, .5f, .5f, -.5f, .5f, .5f, .5f, .5f, -.5f, -.5f, .5f, .5f, .5f, .5f, -.5f, .5f, .5f,
@@ -216,10 +237,14 @@ void Renderer::text(const xm::Mat4& model, float x0, float y0, float size, std::
     glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(scratch_.size() / 5));
 }
 
-void Renderer::video(GLuint tex, int eye, float uScale) {
+void Renderer::video(GLuint tex, int eye, float foveationA, float sharpen, float texelU, float texelV) {
     glUseProgram(videoProg_);
-    const float u0 = eye * 0.5f * uScale, u1 = u0 + 0.5f * uScale;
+    // Each eye fills exactly one half of the decoded image (the PC composes it that way).
+    const float u0 = eye * 0.5f, u1 = u0 + 0.5f;
     glUniform4f(vRect_, u0, 0.f, u1, 1.f);
+    glUniform1f(vFov_, foveationA);
+    glUniform1f(vSharp_, texelU > 0 ? sharpen : 0.f);
+    glUniform2f(vTexel_, texelU, texelV);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_EXTERNAL_OES, tex);
     glDisableVertexAttribArray(0);

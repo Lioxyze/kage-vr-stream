@@ -206,7 +206,17 @@ enum FeatureMask : uint8_t {
 };
 struct StreamFeatures {
     uint8_t flags = 0;
+    // Foveated encoding level 0..3 (client: wanted, driver: applied to this stream). The
+    // encoded image keeps full density at the centre and compresses the edges, see foveationA().
+    uint8_t foveation = 0;
 };
+inline constexpr uint8_t kMaxFoveation = 3;
+// Warp x = a*c + (1-a)*c^3 per axis (c in [-1,1], encoded -> eye). Encoded size = a * render
+// size, so the centre stays 1:1 and the edges get 1 + 3(1-a)/a eye pixels per encoded pixel.
+inline float foveationA(uint8_t level) {
+    constexpr float k[] = {1.0f, 0.85f, 0.75f, 0.65f};
+    return k[level > kMaxFoveation ? kMaxFoveation : level];
+}
 
 struct IdrRequest {
     uint32_t lastFrameIndex = 0;

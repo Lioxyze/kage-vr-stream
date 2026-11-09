@@ -13,7 +13,7 @@ namespace kage::driver {
 namespace {
 
 const char* kShader = R"(
-cbuffer Params : register(b0) { float4 uvRect; float4 flags; };  // uv min.xy, max.xy ; flags.x = linear->sRGB
+cbuffer Params : register(b0) { float4 uvRect; float4 flags; };  // uv min.xy, max.xy ; flags.x = linear->sRGB, flags.y = foveation a
 Texture2D tex : register(t0);
 SamplerState smp : register(s0);
 struct VSOut { float4 pos : SV_Position; float2 uv : TEXCOORD0; };
@@ -21,12 +21,20 @@ VSOut vs(uint id : SV_VertexID) {
     float2 p = float2((id << 1) & 2, id & 2);       // fullscreen triangle
     VSOut o;
     o.pos = float4(p * float2(2, -2) + float2(-1, 1), 0, 1);
-    o.uv = lerp(uvRect.xy, uvRect.zw, p);
+    o.uv = p;  // position in the eye viewport, 0..1 (warped in the pixel shader)
     return o;
 }
 float3 toSrgb(float3 c) { c = saturate(c); return c <= 0.0031308 ? c * 12.92 : 1.055 * pow(c, 1.0 / 2.4) - 0.055; }
+// Foveated encoding: encoded position e -> eye position x = a*c + (1-a)*c^3 (c = 2e-1) per axis.
+// a = 1: identity. The headset applies the exact inverse.
+float2 warp(float2 e, float a) {
+    float2 c = e * 2 - 1;
+    c = a * c + (1 - a) * c * c * c;
+    return c * 0.5 + 0.5;
+}
 float4 ps(VSOut i) : SV_Target {
-    float4 c = tex.Sample(smp, i.uv);
+    const float2 x = warp(i.uv, flags.y);
+    float4 c = tex.Sample(smp, lerp(uvRect.xy, uvRect.zw, x));
     if (flags.x > 0.5) c.rgb = toSrgb(c.rgb);
     return c;
 }
@@ -293,7 +301,7 @@ ID3D11Texture2D* D3DCompositor::compose(const std::vector<std::array<LayerEye, 2
                 }
             }
             const auto& e = layers[li][eye];
-            const float params[8] = {e.uMin, e.vMin, e.uMax, e.vMax, s->linear ? 1.f : 0.f, 0, 0, 0};
+            const float params[8] = {e.uMin, e.vMin, e.uMax, e.vMax, s->linear ? 1.f : 0.f, foveationA_, 0, 0};
             ctx_->UpdateSubresource(cb_.Get(), 0, nullptr, params, 0, 0);
             D3D11_VIEWPORT vp{static_cast<float>(eye * outW_ / 2), 0, static_cast<float>(outW_ / 2), static_cast<float>(outH_), 0, 1};
             ctx_->RSSetViewports(1, &vp);

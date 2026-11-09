@@ -118,7 +118,8 @@ void StreamClient::loop() {
     std::vector<uint8_t> sliceBuf;  // slices of the frame being joined (kFrameSliced)
     uint32_t sliceFrame = 0, sliceNext = 0;  // sliceNext = expected slice (0 = none in progress)
     bool sliceKey = false;
-    const kp::StreamFeatures myFeatures{kp::kFeatureSliceUnits | kp::kFeatureIntraRefresh};
+    const kp::StreamFeatures myFeatures{kp::kFeatureSliceUnits | kp::kFeatureIntraRefresh, wantFoveation_.load()};
+    driverFoveation_ = 0;
 
     while (running_) {
         const uint64_t now = monotonicMicros();
@@ -290,6 +291,7 @@ void StreamClient::loop() {
             if (fe->flags != driverFeatures) klog::info("stream: PC features slices {} intra-refresh {}",
                                                         (fe->flags & kp::kFeatureSliceUnits) != 0, (fe->flags & kp::kFeatureIntraRefresh) != 0);
             driverFeatures = fe->flags;
+            driverFoveation_ = fe->foveation;
         } else if (auto* hp = std::get_if<kp::Haptics>(&*msg)) {
             std::lock_guard l(mutex_);
             if (haptics_.size() < 16) haptics_.push_back(*hp);

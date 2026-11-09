@@ -42,6 +42,7 @@ public:
     // Features the encoder really enabled (kFeature*); combined with what the headset supports.
     void setEncoderFeatures(uint8_t f) { encoderFeatures_ = f; }
     uint8_t activeFeatures() const;
+    float foveationA() const { return protocol::foveationA(foveation_); }
     void sendHaptics(const protocol::Haptics& h);
     void setPacingKbps(uint32_t kbps) { pacingKbps_ = kbps; }
     // Raw PCM on the audio channel: u32 sample rate (LE) + interleaved stereo int16.
@@ -66,6 +67,7 @@ private:
     static constexpr unsigned kFecGroup = 8;  // 1 parity per 8 data datagrams (+12.5 % traffic)
     std::atomic<bool> fec_{true};  // FEC parity on Wi-Fi; off on the USB bridge (loopback, lossless)
     std::atomic<uint8_t> clientFeatures_{0}, encoderFeatures_{0};
+    std::atomic<uint8_t> clientFoveation_{0}, foveation_{0};  // wanted by the headset / applied
     uint64_t paceUntilUs_ = 0;  // encoder thread only
     uint8_t nextSlice_ = 0;
     std::mutex sendMutex_;  // also guards session_ (counter) and the send buffers

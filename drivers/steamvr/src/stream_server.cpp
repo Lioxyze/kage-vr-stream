@@ -61,9 +61,16 @@ StreamConfig StreamServer::makeConfig(const StreamHello& h) const {
     const auto st = kage::driver::loadSettings();
     const bool wantH264 = st.codec == "h264" || !(h.codecs & kCodecHEVC);
     c.codec = wantH264 && (h.codecs & kCodecH264) ? kCodecH264 : kCodecHEVC;
-    // Encoders need even dimensions; 16-aligned avoids padding/cropping work in the encoder.
-    c.width = (h.eyeWidth * 2 + 15) & ~15u;
-    c.height = (h.eyeHeight + 15) & ~15u;
+    // Encoded size = render size x foveation factor (the centre stays 1:1, see foveationA), capped
+    // at 4096 (HEVC/H.264 hardware limit): the headset samples normalised coordinates, so a
+    // smaller encoded image is simply scaled. 16-aligned for the encoders.
+    const float a = protocol::foveationA(foveation_.load());
+    float eyeW = h.eyeWidth * a, eyeH = h.eyeHeight * a;
+    const float fit = std::min({1.f, 4096.f / (2 * eyeW), 4096.f / eyeH});
+    eyeW *= fit;
+    eyeH *= fit;
+    c.width = (static_cast<uint32_t>(eyeW) * 2 + 15) & ~15u;
+    c.height = (static_cast<uint32_t>(eyeH) + 15) & ~15u;
     c.refreshHz = h.refreshHz;
     c.bitrateKbps = st.maxBitrateKbps ? st.maxBitrateKbps : h.maxBitrateKbps;  // no cap: user choice
     return c;
@@ -106,7 +113,10 @@ void StreamServer::recvLoop() {
             {
                 std::lock_guard l(mutex_);
                 if (!hello_) hello_ = *hello;  // display geometry is fixed for the session
-                if (!config_) config_ = makeConfig(*hello_);
+                if (!config_) {
+                    foveation_ = clientFoveation_.load();  // fixed for the stream once configured
+                    config_ = makeConfig(*hello_);
+                }
                 cfg = *config_;
             }
             lastRecvUs_ = monotonicMicros();
@@ -127,6 +137,7 @@ void StreamServer::recvLoop() {
             sendFeatures();  // cheap (1 byte), keeps the headset in sync once the encoder is up
         } else if (auto* fe = std::get_if<StreamFeatures>(&*msg)) {
             clientFeatures_ = fe->flags;
+            clientFoveation_ = fe->foveation;
         } else if (auto* p = std::get_if<Ping>(&*msg)) {
             Pong pong{p->pingId, p->clientSendUs, lastRecvUs_.load(), monotonicMicros()};
             encodeMessage(pong, payload);
@@ -233,7 +244,7 @@ uint8_t StreamServer::activeFeatures() const {
 
 void StreamServer::sendFeatures() {
     std::vector<uint8_t> payload;
-    encodeMessage(StreamFeatures{activeFeatures()}, payload);
+    encodeMessage(StreamFeatures{activeFeatures(), foveation_.load()}, payload);
     send(Channel::Control, payload);
 }
 

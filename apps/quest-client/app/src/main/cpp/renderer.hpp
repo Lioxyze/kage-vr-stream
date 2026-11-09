@@ -36,11 +36,12 @@ public:
     float textWidth(std::string_view utf8, float size) const;
 
     // Full-viewport draw of half of a side-by-side external OES video frame.
-    void video(GLuint oesTexture, int eye, float uScale);
+    // foveationA: 1 = off (see protocol::foveationA). sharpen: 0..1. texel: 1/decoded size.
+    void video(GLuint oesTexture, int eye, float foveationA, float sharpen, float texelU, float texelV);
 
 private:
     GLuint colorProg_ = 0, textProg_ = 0, videoProg_ = 0;
-    GLint cMvp_ = -1, cColor_ = -1, tMvp_ = -1, tColor_ = -1, vRect_ = -1;
+    GLint cMvp_ = -1, cColor_ = -1, tMvp_ = -1, tColor_ = -1, vRect_ = -1, vFov_ = -1, vSharp_ = -1, vTexel_ = -1;
     GLuint cubeVbo_ = 0, quadVbo_ = 0, dynVbo_ = 0, vao_ = 0;
     GLuint atlas_ = 0;
     bool hasFont_ = false;

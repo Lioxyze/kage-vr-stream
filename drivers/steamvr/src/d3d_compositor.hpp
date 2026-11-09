@@ -39,6 +39,7 @@ public:
     uint32_t nextIndex(uint64_t handle);
 
     void setOutputSize(uint32_t w, uint32_t h);
+    void setFoveation(float a) { foveationA_ = a; }  // 1 = off (see protocol::foveationA)
     // Composites up to 4 layers (first opaque, others alpha-blended) into the next ring slot.
     // Returns the texture to encode, or nullptr on failure.
     ID3D11Texture2D* compose(const std::vector<std::array<LayerEye, 2>>& layers, uint64_t syncTexture);
@@ -68,6 +69,7 @@ private:
     std::array<ComPtr<ID3D11Texture2D>, kRing> out_;
     std::array<ComPtr<ID3D11RenderTargetView>, kRing> rtv_;
     uint32_t outW_ = 0, outH_ = 0;
+    float foveationA_ = 1.f;
     int ringPos_ = 0;
     uint64_t syncHandle_ = 0;
     ComPtr<IDXGIKeyedMutex> syncKm_;

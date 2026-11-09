@@ -34,6 +34,9 @@ public:
     void stop();
     // Headset microphone -> PC (opt-in, off by default; only while streaming).
     void setMic(bool on) { micOn_ = on; }
+    // Foveated encoding wanted for the next stream (0..3) and the level the PC really applies.
+    void setFoveation(uint8_t level) { wantFoveation_ = level; }
+    uint8_t driverFoveation() const { return driverFoveation_; }
     bool micActive() const { return micActive_; }
     bool running() const { return running_; }
 
@@ -60,6 +63,7 @@ private:
     std::thread thread_;
     std::thread micThread_;
     std::atomic<bool> micOn_{false}, micActive_{false};
+    std::atomic<uint8_t> wantFoveation_{0}, driverFoveation_{0};
     std::atomic<bool> running_{false};
     std::atomic<VideoDecoder*> decoder_{nullptr};
 

@@ -279,11 +279,17 @@ struct Quality {
     uint32_t kbps;
 };
 constexpr Quality kQualities[] = {{"Basse", 1.0f, 40000}, {"Moyenne", 1.0f, 80000}, {"Haute", 1.0f, 150000}, {"Max", 1.0f, 200000}};  // resolution scaling distorts the view (to debug): bitrate only
+// Render resolution (per axis, vs the headset native), foveated encoding, sharpening: menu rows.
+constexpr float kResScales[] = {1.0f, 1.1f, 1.2f, 1.3f};
+constexpr const char* kResNames[] = {"Réso 100 %", "110 %", "120 %", "130 %"};
+constexpr const char* kFovNames[] = {"Fovéal non", "Léger", "Moyen", "Fort"};
+constexpr const char* kSharpNames[] = {"Netteté 0", "1", "2", "3"};
+constexpr float kSharpAmount[] = {0.f, 0.25f, 0.5f, 0.8f};
 
 class Panel {
 public:
     XrPosef pose{{0, 0, 0, 1}, {0, 1.4f, -1.2f}};
-    float width = 0.9f, height = 0.62f;
+    float width = 0.9f, height = 0.86f;
 
     void placeInFront(const XrPosef& head, float dist) {
         XrVector3f fwd = xm::rotate(head.orientation, {0, 0, -1});
@@ -329,7 +335,7 @@ const Button* buttonAt(const std::vector<Button>& b, float u, float v) {
 std::string ms(float v) { return v >= 0 ? std::format("{:.1f} ms", v) : std::string("Non disponible"); }
 
 enum class Mode { Lobby, Connecting, Streaming };
-enum ButtonId { kBtnHost0 = 100, kBtnRate0 = 200, kBtnQuality0 = 400, kBtnDisconnect = 300, kBtnResume = 301, kBtnRecenter = 302, kBtnCalibrate = 303, kBtnMic = 304 };
+enum ButtonId { kBtnHost0 = 100, kBtnRate0 = 200, kBtnQuality0 = 400, kBtnRes0 = 500, kBtnFov0 = 600, kBtnSharp0 = 700, kBtnDisconnect = 300, kBtnResume = 301, kBtnRecenter = 302, kBtnCalibrate = 303, kBtnMic = 304 };
 
 // ---------------------------------------------------------------------------
 class App {
@@ -343,6 +349,12 @@ public:
         stream_.setMic(micOn_);
         if (std::ifstream qf(qualityFile_); qf >> quality_) quality_ = std::clamp(quality_, 0, static_cast<int>(std::size(kQualities)) - 1);
         else quality_ = 2;
+        auto loadLevel = [&](const char* name, int& v, int n) {
+            if (std::ifstream f(dataDir_ / name); f >> v) v = std::clamp(v, 0, n - 1);
+        };
+        loadLevel("res.txt", res_, static_cast<int>(std::size(kResScales)));
+        loadLevel("fov.txt", fov_, static_cast<int>(std::size(kFovNames)));
+        loadLevel("sharp.txt", sharp_, static_cast<int>(std::size(kSharpNames)));
         // App-private storage: this headset's identity key and the PCs it trusts.
         auto id = kage::crypto::loadOrCreateKeyPair(dataDir_ / "client.key");
         if (!id) {
@@ -467,12 +479,15 @@ private:
             hello.ipdMeters = std::clamp(ipd, 0.045f, 0.085f);
             {
                 const auto& q = kQualities[quality_];
-                hello.eyeWidth = static_cast<uint32_t>(hello.eyeWidth * q.scale) & ~15u;
-                hello.eyeHeight = static_cast<uint32_t>(hello.eyeHeight * q.scale) & ~15u;
-                hello.maxBitrateKbps = q.kbps;
+                // SteamVR renders at this size; the PC encodes it (foveated: smaller) and the image is
+                // always mapped by normalised coordinates, so any size displays without distortion.
+                const float s = q.scale * kResScales[res_];
+                hello.eyeWidth = static_cast<uint32_t>(hello.eyeWidth * s) & ~15u;
+                hello.eyeHeight = static_cast<uint32_t>(hello.eyeHeight * s) & ~15u;
+                hello.maxBitrateKbps = q.kbps;  // the quality choice (was overridden by a fixed 150)
             }
             hello.codecs = kp::kCodecHEVC | kp::kCodecH264;
-            hello.maxBitrateKbps = 150'000;
+            stream_.setFoveation(static_cast<uint8_t>(fov_));
             stream_.start({target_.control.ipv4, reply->streamPort}, hello, identity_, res.hostKey);
         }
         if (stream_.running()) {
@@ -480,7 +495,6 @@ private:
             if (cfg && !decoder_.ready()) {
                 if (decoder_.init(cfg->codec == kp::kCodecHEVC, static_cast<int>(cfg->width), static_cast<int>(cfg->height))) {
                     stream_.attachDecoder(&decoder_);
-                    uScale_ = static_cast<float>(xr_.eyeWidth() * 2) / static_cast<float>(cfg->width);
                     status_ = "Flux vidéo en attente…";
                 } else {
                     status_ = "Décodeur vidéo indisponible";
@@ -601,6 +615,15 @@ private:
                                     kBtnQuality0 + static_cast<int>(i), true});
                 buttons_.back().selected = static_cast<int>(i) == quality_;
             }
+            auto row = [&](const char* const* names, size_t n, float y, int base, int sel) {
+                for (size_t i = 0; i < n && mode_ == Mode::Lobby; ++i) {
+                    buttons_.push_back({-0.30f + i * (bw + 0.02f), -top + y, bw, 0.06f, names[i], base + static_cast<int>(i), true});
+                    buttons_.back().selected = static_cast<int>(i) == sel;
+                }
+            };
+            row(kResNames, std::size(kResNames), 0.26f, kBtnRes0, res_);
+            row(kFovNames, std::size(kFovNames), 0.34f, kBtnFov0, fov_);
+            row(kSharpNames, std::size(kSharpNames), 0.42f, kBtnSharp0, sharp_);
         } else if (overlay_) {
             buttons_.push_back({-0.26f, -top + 0.09f, 0.3f, 0.07f, "Reprendre", kBtnResume});
             buttons_.push_back({0.05f, -top + 0.09f, 0.22f, 0.07f, "Recentrer", kBtnRecenter});
@@ -621,6 +644,15 @@ private:
         } else if (id >= kBtnQuality0 && id < kBtnQuality0 + static_cast<int>(std::size(kQualities))) {
             quality_ = id - kBtnQuality0;
             std::ofstream(qualityFile_, std::ios::trunc) << quality_;
+        } else if (id >= kBtnRes0 && id < kBtnRes0 + static_cast<int>(std::size(kResScales))) {
+            res_ = id - kBtnRes0;
+            std::ofstream(dataDir_ / "res.txt", std::ios::trunc) << res_;
+        } else if (id >= kBtnFov0 && id < kBtnFov0 + static_cast<int>(std::size(kFovNames))) {
+            fov_ = id - kBtnFov0;
+            std::ofstream(dataDir_ / "fov.txt", std::ios::trunc) << fov_;
+        } else if (id >= kBtnSharp0 && id < kBtnSharp0 + static_cast<int>(std::size(kSharpNames))) {
+            sharp_ = id - kBtnSharp0;  // applied live
+            std::ofstream(dataDir_ / "sharp.txt", std::ios::trunc) << sharp_;
         } else if (id >= kBtnRate0 && id < kBtnRate0 + 10) {
             const size_t i = static_cast<size_t>(id - kBtnRate0);
             if (i < std::size(kModes)) setMode(kModes[i].fps);
@@ -693,7 +725,9 @@ private:
         glDisable(GL_CULL_FACE);
         if (mode_ == Mode::Streaming && decoder_.hasFrame()) {
             glDisable(GL_BLEND);
-            renderer_.video(decoder_.texture(), eye, uScale_);
+            const auto cfg = stream_.config();
+            renderer_.video(decoder_.texture(), eye, kp::foveationA(stream_.driverFoveation()), kSharpAmount[sharp_],
+                            cfg ? 1.f / cfg->width : 0.f, cfg ? 1.f / cfg->height : 0.f);
         } else {
             glClearColor(0.004f, 0.002f, 0.012f, 1);
             glClear(GL_COLOR_BUFFER_BIT);
@@ -792,7 +826,6 @@ private:
             renderer_.text(m, left + 0.02f, y, 0.025f, std::format("{}  ({})", h.name, h.control.toString()), palette::kText);
             renderer_.text(m, W / 2 - 0.20f, y, 0.022f, h.rttMs >= 0 ? std::format("{:.1f} ms", h.rttMs) : "", palette::kCyan);
         }
-        renderer_.text(m, left, -top + 0.17f, 0.02f, "Images par seconde (moins = image plus nette)", palette::kDim);
         if (!status_.empty()) renderer_.text(m, left, -top + 0.035f, 0.02f, status_, palette::kWarn);
     }
 
@@ -830,7 +863,7 @@ private:
     bool menuWasDown_ = false, autoTried_ = false;
     FrameContext ctx_;
     kp::VideoFrameMeta frameMeta_;
-    float uScale_ = 1.f;
+    int res_ = 0, fov_ = 0, sharp_ = 1;  // resolution, foveation, sharpening levels (menu)
     double predictionUs_ = 40'000;  // initial guess, self-calibrated while streaming
 };
 

@@ -234,6 +234,7 @@ public:
              std::filesystem::exists(std::wstring(local) + L"\\KageVR\\dump.request")))
             gpu_.enableDump(std::wstring(local) + L"\\KageVR\\frame.bmp");
         gpu_.setOutputSize(cfg_.width, cfg_.height);
+        gpu_.setFoveation(net_.foveationA());
         bitrateKbps_ = cfg_.bitrateKbps;  // start at the chosen quality; AIMD backs off on loss
         // Encoder: settings.ini "encoder" = auto (AMD AMF, then the GPU vendor through Media
         // Foundation: NVIDIA / Intel / AMD, then software), amf, gpu or software.

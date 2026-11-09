@@ -167,7 +167,10 @@ void encodeMessage(const Message& m, std::vector<uint8_t>& out) {
                        w.bytes(c.clientEphemeral);
                    },
                    [&](const CalibrateFullBody&) {},
-                   [&](const StreamFeatures& f) { w.u8(f.flags); },
+                   [&](const StreamFeatures& f) {
+                       w.u8(f.flags);
+                       w.u8(f.foveation);
+                   },
                    [&](const SecureAccept& c) {
                        w.bytes(c.hostEphemeral);
                        w.bytes(c.confirm);
@@ -322,6 +325,8 @@ std::optional<Message> decodeMessage(std::span<const uint8_t> payload) {
         case MessageType::StreamFeatures: {
             StreamFeatures f;
             r.u8(f.flags);  // unknown bits ignored: future features stay compatible
+            r.u8(f.foveation);
+            if (f.foveation > kMaxFoveation) f.foveation = kMaxFoveation;
             result = f;
             break;
         }
