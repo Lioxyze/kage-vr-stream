@@ -122,9 +122,9 @@ public partial class MainWindow : Window
     private async void OnDriverClick(object s, RoutedEventArgs e)
     {
         var installed = DriverRegistered();
-        if (!installed && MessageBox.Show("Enregistrer le pilote KAGÉ dans SteamVR (vrpathreg adddriver) ?\nRéversible avec « Retirer le pilote ».",
+        if (!installed && MessageBox.Show("Enregistrer le pilote LIO VR (kage) dans SteamVR (vrpathreg adddriver) ?\nRéversible avec « Retirer le pilote ».",
                                           "Pilote SteamVR", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
-        if (installed && MessageBox.Show("Retirer le pilote KAGÉ de SteamVR ?\nSans lui : plus d'image dans le casque ni de trackers Rift.",
+        if (installed && MessageBox.Show("Retirer le pilote LIO VR (kage) de SteamVR ?\nSans lui : plus d'image dans le casque ni de trackers Rift.",
                                          "Pilote SteamVR", MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK) return;
         if (!installed) RemoveStaleDriverPaths();
         Log((await RunHost(installed ? "remove-driver" : "install-driver")).Trim());
@@ -153,7 +153,7 @@ public partial class MainWindow : Window
         Log($"Demande d'appairage de « {name} », code {code}.");
         var ok = MessageBox.Show(this, $"Le casque « {name} » demande à se connecter.\n\nCode : {code}\n\n" +
                                        "Accepter seulement si le casque affiche exactement le même code.",
-                                 "Appairage KAGÉ", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
+                                 "Appairage LIO VR", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
         if (ok)
         {
             Directory.CreateDirectory(_dataDir);

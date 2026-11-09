@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="LIO VR" Width="1080" Height="720" MinWidth="860" MinHeight="600"
-        Background="{StaticResource Bg}" WindowStartupLocation="CenterScreen" Icon="kage.ico">
+        Background="{StaticResource Bg}" Foreground="{StaticResource Text}" WindowStartupLocation="CenterScreen" Icon="kage.ico">
     <Grid Margin="18">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -79,7 +79,7 @@
             <TabItem Header="Full body (Rift CV1)">
                 <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="10">
                     <TextBlock TextWrapping="Wrap" Foreground="#B9B7C9" Margin="0,0,0,10"
-                               Text="Les manettes Touch du Rift CV1 deviennent des trackers SteamVR (pied gauche, pied droit, bassin = 3e manette déclarée comme « objet VR » dans Meta Horizon Link). Remplace OculusTouchLink, Space Calibrator et ODTKRA. Fonctionne avec KAGÉ ou Virtual Desktop : garder KageVR ouvert (il lit le Rift)."/>
+                               Text="Les manettes Touch du Rift CV1 deviennent des trackers SteamVR (pied gauche, pied droit, bassin = 3e manette déclarée comme « objet VR » dans Meta Horizon Link). Remplace OculusTouchLink, Space Calibrator et ODTKRA. Fonctionne avec LIO VR ou Virtual Desktop : garder KageVR ouvert (il lit le Rift)."/>
                     <CheckBox x:Name="FullBodyCheck" Foreground="#ECEBF4" Content="Activer le full body (prise en compte au prochain lancement de SteamVR)" Click="OnFullBodyToggle" Margin="0,4"/>
                     <CheckBox x:Name="KeepAwakeCheck" Foreground="#ECEBF4" Content="Garder le Rift éveillé et réduire son rendu au minimum (moins de charge GPU)" Click="OnKeepAwakeToggle" Margin="0,4"/>
                     <WrapPanel Margin="0,8">
@@ -108,7 +108,7 @@
                         </Style>
                     </StackPanel.Resources>
                     <TextBlock TextWrapping="Wrap" Foreground="#B9B7C9" Margin="0,0,0,12"
-                               Text="Aucune limite : tout est essayé, même sur un petit PC. Les images/s et la qualité se règlent aussi dans le casque (menu KAGÉ). Pour un PC faible : baisse la résolution dans les paramètres de SteamVR (Vidéo), choisis 45 ou 60 i/s dans le casque et H.264 ici."/>
+                               Text="Aucune limite : tout est essayé, même sur un petit PC. Les images/s et la qualité se règlent aussi dans le casque (lobby LIO VR). Pour un PC faible : baisse la résolution dans les paramètres de SteamVR (Vidéo), choisis 45 ou 60 i/s dans le casque et H.264 ici."/>
                     <TextBlock Text="ENCODEUR VIDÉO" FontSize="11" Foreground="#8A879C"/>
                     <ComboBox x:Name="EncoderBox" Margin="0,4,0,12" SelectedIndex="0">
                         <ComboBoxItem Content="Automatique (AMD, puis NVIDIA / Intel / AMD via Windows, puis processeur)"/>

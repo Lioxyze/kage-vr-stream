@@ -12,8 +12,10 @@
         <SolidColorBrush x:Key="Dim" Color="#8C8AA0"/>
         <SolidColorBrush x:Key="Warn" Color="#FF9E26"/>
 
+        <!-- No Foreground here: an implicit TextBlock style reaches the TextBlocks inside control
+             templates (ComboBox lists = light text on white). The light text is inherited from the
+             window's Foreground instead, and a ComboBox's dark Foreground reaches its items. -->
         <Style TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource Text}"/>
             <Setter Property="FontFamily" Value="Segoe UI Variable Text, Segoe UI"/>
         </Style>
         <Style x:Key="CardStyle" TargetType="Border">
