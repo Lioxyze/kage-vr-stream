@@ -12,7 +12,7 @@ INSTALLATION (une seule fois)
 
 UTILISATION
   1. Lancer KageVR sur le PC, se connecter avec le casque.
-  2. Dans le casque : appui long sur le bouton Menu (manette gauche) -> menu KAGE
+  2. Dans le casque : appui long sur le bouton Menu (manette gauche) -> menu LIO VR
      -> bouton "Micro : desactive" pour l'activer. La 1re fois, accepter l'autorisation du micro.
      Le bouton doit afficher "Micro : ACTIVE (envoye au PC)".
   3. Dans le jeu / Discord / Voicemeeter : choisir le micro "CABLE Output (VB-Audio Virtual Cable)".

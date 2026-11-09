@@ -112,3 +112,21 @@ Dernière mise à jour : 2026-11-06. Matériel de test : RX 6700 XT + **Meta Que
 ## Choix de la connexion (2026-11-09)
 
 - L'option « Wi-Fi uniquement » est retirée de KageVR et de kage-host. Le choix se fait dans le lobby du casque : quand le câble est branché, le PC apparaît deux fois, « … (Wi-Fi) » et « … (USB) ». Test au casque : Non disponible.
+
+## Contrôleur de débit plus calme (2026-11-09)
+
+- Le contrôleur est sorti dans `bitrate_controller.hpp` (6 tests unitaires). Changements :
+  - les images manquantes sont comptées sur un solde courant : une image encore en route au moment d'un rapport n'est plus une perte (c'est elle qui faisait chuter le débit de 20 à 11 Mbit/s à 19:51:17, avec 0 image perdue) ;
+  - un gros retard doit durer 2 rapports d'affilée ;
+  - après une coupure, le débit remonte de 30 %/s jusqu'au dernier débit stable, puis de 10 %/s ;
+  - l'attente après une coupure passe de 2 s à 1 s.
+- Rejeu (`kage-bitrate-replay`) sur les 95 min de sessions de driver.log : 912 → 790 coupures, débit moyen calculé 104 → 156 Mbit/s. Limite : le rejeu est en boucle ouverte (les rapports ont été produits avec l'ancien débit). Un débit plus haut n'y prouve donc pas que le Wi-Fi l'aurait tenu. Test au casque : Non disponible.
+
+## i/s conseillés selon la sonde Wi-Fi (2026-11-09)
+
+- Le casque garde la dernière mesure (wifi.txt) et conseille 120 / 90 / 72 i/s, en gardant environ 0,45 Mbit par image au débit de départ (60 % de la mesure). Le conseil s'affiche dans le lobby et dans les statistiques de session ; le changement d'i/s reste manuel. Règle heuristique, non validée par une mesure de qualité d'image. Avec les mesures de ce soir (34 et 60 Mbit/s), le conseil est 72 i/s.
+
+## Test de bout en bout sans casque : `test_stream_e2e` (2026-11-09)
+
+- Un faux casque se connecte au vrai `StreamServer` sur l'adresse réseau du PC, donc avec le chemin Wi-Fi (FEC et sonde). Résultats : connexion chiffrée, StreamConfig, sonde 2000/2000 paquets en 110 ms (193 Mbit/s), vidéo retenue pendant la sonde puis relâchée avec une seule demande d'image clé, 120 tranches sur 120 intactes, 60 fragments réparés par la FEC (2 pertes simulées par image), statistiques reçues par le pilote.
+- Compilation : 0 avertissement. Tests : 7/7 suites OK.

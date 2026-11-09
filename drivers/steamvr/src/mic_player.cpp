@@ -124,7 +124,11 @@ bool MicPlayer::playOnce() {
         log::warn("mic: cannot open the playback device");
         return false;
     }
-    log::info("mic: headset microphone -> {}", std::string(name.begin(), name.end()));
+    // UTF-8 (the device name may contain accents: "Haut-parleurs", "Câble"...).
+    std::string utf8(static_cast<size_t>(WideCharToMultiByte(CP_UTF8, 0, name.c_str(), -1, nullptr, 0, nullptr, nullptr)), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, name.c_str(), -1, utf8.data(), static_cast<int>(utf8.size()), nullptr, nullptr);
+    if (!utf8.empty()) utf8.pop_back();  // terminating NUL
+    log::info("mic: headset microphone -> {}", utf8);
     UINT32 bufFrames = 0;
     client->GetBufferSize(&bufFrames);
     double pos = 0;

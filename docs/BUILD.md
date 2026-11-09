@@ -1,4 +1,4 @@
-# Compiler KAGÉ VR Stream
+# Compiler LIO VR (projet KAGÉ VR Stream)
 
 Terminal : **PowerShell** (Windows PowerShell 5.1 ou PowerShell 7).
 
@@ -48,7 +48,7 @@ Prérequis :
 ## Test manuel de la phase 1 (PC + casque)
 
 1. PC : `kage-host.exe serve`. Accepter la demande du pare-feu Windows **uniquement pour les réseaux privés**.
-2. Casque : lancer KAGÉ VR Stream. Le fond est violet foncé pendant la recherche, cyan une fois connecté, orange si l'hôte ne répond plus.
+2. Casque : lancer LIO VR. Le fond est violet foncé pendant la recherche, cyan une fois connecté, orange si l'hôte ne répond plus.
 3. `adb logcat -s KageVR` doit afficher :
    - `OpenXR runtime: ...` et `eye 0: recommended WxH`, avec les valeurs réelles du casque
    - `refresh rates supported: ...`

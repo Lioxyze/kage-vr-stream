@@ -6,6 +6,12 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Standard C file/env functions (fopen, fscanf, getenv) are used on purpose: the MSVC "_s"
+# variants are not portable (core also builds for Android).
+if(MSVC)
+    add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
+endif()
+
 option(KAGE_BUILD_TESTS "Build unit and loopback integration tests" ON)
 option(KAGE_BUILD_HOST "Build the Windows host application" ${WIN32})
 

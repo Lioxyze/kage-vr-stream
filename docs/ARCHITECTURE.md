@@ -1,4 +1,4 @@
-# KAGÉ VR Stream — décisions d'architecture
+# LIO VR (KAGÉ VR Stream) — décisions d'architecture
 
 Document volontairement court : il fixe les choix pris et leurs raisons. Il ne remplace pas une étude complète.
 
