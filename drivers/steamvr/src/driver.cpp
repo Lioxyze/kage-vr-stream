@@ -338,8 +338,11 @@ public:
         if (bestNetUs_) bestNetUs_ += 50;  // slowly forget an old optimum (route/channel changes)
         // Wi-Fi has isolated latency spikes unrelated to our rate: queueing delay must last 2 s.
         delayStrikes_ = (net && bestNetUs_ && net > bestNetUs_ + 10000) ? delayStrikes_ + 1 : 0;
+        // A large queueing delay (> 25 ms over the best) is acted on at once: the Wi-Fi queue
+        // only drains if we send less, and waiting one more second is a second of lag.
+        const bool bigDelay = net && bestNetUs_ && net > bestNetUs_ + 25000;
         const bool congested = s.framesDropped > 0 || s.framesReceived + 5 < sentDelta ||
-                               delayStrikes_ >= 2;
+                               delayStrikes_ >= 2 || bigDelay;
         uint32_t br = bitrateKbps_;
         if (++reports_ <= 5) {
             // SteamVR start-up (shader compiles, dashboard loading) causes transient stalls: ignore.

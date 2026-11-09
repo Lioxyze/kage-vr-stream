@@ -59,6 +59,8 @@ private:
     std::optional<protocol::StreamConfig> config_;
     std::atomic<uint64_t> lastRecvUs_{0};
     std::atomic<uint32_t> pacingKbps_{60000};
+    static constexpr unsigned kFecGroup = 8;  // 1 parity per 8 data datagrams (+12.5 % traffic)
+    std::atomic<bool> fec_{true};  // FEC parity on Wi-Fi; off on the USB bridge (loopback, lossless)
     std::mutex sendMutex_;  // also guards session_ (counter) and the send buffers
     crypto::KeyPair hostKey_;
     std::filesystem::path pairedFile_;

@@ -170,6 +170,7 @@ void StreamServer::handleSecureHello(const SecureHello& sh, const net::Endpoint&
         sessionEph_ = sh.clientEphemeral;
         std::lock_guard l(mutex_);
         client_ = from;
+        fec_ = (from.ipv4 >> 24) != 127;  // USB bridge (loopback) never loses packets
         log::info("stream: encrypted session with {} established, Wi-Fi priority {}", from.toString(),
                   sock_.setLowLatencyPriority(from) ? "on" : "unavailable");
     }
@@ -197,7 +198,8 @@ void StreamServer::sendVideo(uint32_t frameIndex, bool keyframe, const VideoFram
                       while (monotonicMicros() < due) std::this_thread::yield();
                       send(Channel::Video, p);
                       sent += p.size() + PacketHeader::kSize + crypto::SecureSession::kOverhead;
-                  });
+                  },
+                  kMaxVideoPayload, fec_ ? kFecGroup : 0);
 }
 
 void StreamServer::sendHaptics(const Haptics& hp) {

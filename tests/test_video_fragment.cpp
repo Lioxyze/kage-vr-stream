@@ -125,3 +125,69 @@ TEST(frame_index_wraparound) {
 }
 
 KT_MAIN()
+
+static std::vector<std::vector<uint8_t>> splitFec(uint32_t idx, const std::vector<uint8_t>& f, unsigned group) {
+    std::vector<std::vector<uint8_t>> out;
+    fragmentFrame(idx, 1000 + idx, 0, f, [&](std::span<const uint8_t> p) { out.emplace_back(p.begin(), p.end()); },
+                  kMaxVideoPayload, group);
+    return out;
+}
+
+TEST(fec_recovers_one_loss_per_group_including_last_short_fragment) {
+    auto frame = makeFrame(100000, 3);  // 76 data fragments, last one short
+    const size_t data = (frame.size() + kMaxVideoPayload - 1) / kMaxVideoPayload;
+    auto frags = splitFec(5, frame, 8);
+    const size_t groups = (data + 7) / 8;
+    CHECK(frags.size() == data + groups);
+    for (auto& f : frags) CHECK(f.size() + PacketHeader::kSize + 24 <= kMaxDatagram);
+    // A burst of `groups` consecutive losses hits each interleaved group once; include the last one.
+    std::vector<bool> lost(frags.size(), false);
+    for (size_t i = data - groups; i < data; ++i) lost[i] = true;
+    FrameReassembler r;
+    std::optional<CompletedFrame> done;
+    for (size_t i = 0; i < frags.size(); ++i)
+        if (!lost[i])
+            if (auto d = r.push(frags[i])) done = std::move(d);
+    CHECK(done.has_value());
+    CHECK(done && done->data == frame);
+    CHECK(r.stats().fragmentsRecovered == groups);
+    CHECK(!r.keyframeNeeded());
+}
+
+TEST(fec_parity_before_data_and_two_losses_in_group) {
+    auto frame = makeFrame(30000, 9);
+    auto frags = splitFec(6, frame, 4);
+    const size_t data = (frame.size() + kMaxVideoPayload - 1) / kMaxVideoPayload;
+    const size_t groups = frags.size() - data;
+    {  // parity first, then data with one loss: rebuilt as soon as the rest arrives
+        FrameReassembler r;
+        for (size_t i = data; i < frags.size(); ++i) CHECK(!r.push(frags[i]));
+        std::optional<CompletedFrame> done;
+        for (size_t i = 1; i < data; ++i)
+            if (auto d = r.push(frags[i])) done = std::move(d);
+        CHECK(done && done->data == frame);
+    }
+    {  // two losses in the same group: not recoverable, frame stays incomplete
+        FrameReassembler r;
+        std::optional<CompletedFrame> done;
+        for (size_t i = 0; i < frags.size(); ++i)
+            if (i != 0 && i != groups)
+                if (auto d = r.push(frags[i])) done = std::move(d);
+        CHECK(!done);
+    }
+}
+
+TEST(fec_corrupt_parity_rejected) {
+    auto frame = makeFrame(20000, 1);
+    auto frags = splitFec(7, frame, 4);
+    auto bad = frags.back();
+    bad.resize(bad.size() - 1);  // wrong fragment size
+    FrameReassembler r;
+    CHECK(!r.push(bad));  // arrives first: accepted, but its size disagrees with the data
+    const size_t data = (frame.size() + kMaxVideoPayload - 1) / kMaxVideoPayload;
+    std::optional<CompletedFrame> done;
+    for (size_t i = 1; i < data; ++i)
+        if (auto d = r.push(frags[i])) done = std::move(d);
+    CHECK(!done);  // never rebuilt from a mismatched parity (no corrupt frame)
+    CHECK(r.stats().fragmentsRecovered == 0);
+}

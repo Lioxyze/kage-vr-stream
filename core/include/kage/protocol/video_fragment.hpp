@@ -31,6 +31,10 @@ struct VideoFragmentHeader {
 
 enum VideoFrameFlags : uint8_t {
     kFrameKeyframe = 1u << 0,
+    // FEC parity datagram: XOR of an interleaved group of data fragments (fragment i belongs
+    // to group i % groups). fragmentIndex = group, fragmentOffset = number of groups.
+    // One lost fragment per group is rebuilt without waiting for a keyframe.
+    kFrameParity = 1u << 1,
 };
 
 inline constexpr uint32_t kMaxFrameSize = 8u * 1024u * 1024u;  // 8 MiB per encoded frame
@@ -40,7 +44,8 @@ inline constexpr size_t kMaxVideoPayload =
 // Produces the payloads (fragment header + data) for one encoded frame. Each
 // payload fits in kMaxVideoPayload + VideoFragmentHeader::kSize bytes.
 void fragmentFrame(uint32_t frameIndex, uint64_t poseTimeUs, uint8_t flags, std::span<const uint8_t> frame,
-                   const std::function<void(std::span<const uint8_t>)>& emit, size_t maxPayload = kMaxVideoPayload);
+                   const std::function<void(std::span<const uint8_t>)>& emit, size_t maxPayload = kMaxVideoPayload,
+                   unsigned fecGroup = 0);  // 0 = no FEC; N = one parity datagram per N data fragments
 
 struct CompletedFrame {
     uint32_t frameIndex = 0;
@@ -56,6 +61,7 @@ struct ReassemblyStats {
     uint64_t fragmentsStale = 0;     // belong to an already superseded frame
     uint64_t framesCompleted = 0;
     uint64_t framesDropped = 0;      // incomplete frames discarded
+    uint64_t fragmentsRecovered = 0;  // rebuilt from FEC parity
 };
 
 class FrameReassembler {
@@ -82,10 +88,16 @@ private:
         uint8_t flags = 0;
         std::vector<uint8_t> data;
         std::vector<bool> have;
+        uint16_t groups = 0;   // FEC groups (0 until a parity datagram arrives)
+        size_t parityLen = 0;  // = data fragment size
+        size_t fragLen = 0;    // size of the full-size data fragments seen so far
+        std::vector<std::vector<uint8_t>> parity;
+        std::vector<uint16_t> groupHave;  // data fragments received per group
     };
 
     Slot* findOrCreate(const VideoFragmentHeader& h);
     void dropOlderThan(uint32_t frameIndex);
+    void tryRecover(Slot& s, uint16_t group);
 
     Slot slots_[kMaxInFlight];
     bool haveDelivered_ = false;
