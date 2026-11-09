@@ -108,3 +108,7 @@ Dernière mise à jour : 2026-11-06. Matériel de test : RX 6700 XT + **Meta Que
 ## Mise à jour : vérification au démarrage
 
 - Au lancement, KageVR interroge l'API publique des releases et affiche « Mettre à jour ● » si une version plus récente existe. Il n'installe jamais rien tout seul. Testé avec version.txt = 1658 : la pastille s'affiche.
+
+## Choix de la connexion (2026-11-09)
+
+- L'option « Wi-Fi uniquement » est retirée de KageVR et de kage-host. Le choix se fait dans le lobby du casque : quand le câble est branché, le PC apparaît deux fois, « … (Wi-Fi) » et « … (USB) ». Test au casque : Non disponible.

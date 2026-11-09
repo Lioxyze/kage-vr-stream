@@ -186,7 +186,7 @@ private:
                                         : kage::net::Endpoint::broadcast(kp::kDefaultDiscoveryPort);
                     auto h = link.discover(ep, name, 400);
                     if (!h) continue;
-                    if (via) h->name += " (USB)";
+                    h->name += via ? " (USB)" : " (Wi-Fi)";  // cable plugged: both entries, the user picks
                     auto s = link.ping(h->control, 200);
                     std::lock_guard l(m_);
                     auto& e = hosts_[h->control.ipv4];

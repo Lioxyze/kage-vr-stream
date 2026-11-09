@@ -33,23 +33,13 @@ namespace {
 
 std::atomic<bool> g_stop{false};
 
-// wifiOnlyFlag present (GUI "Wi-Fi uniquement"): the tunnel is removed once and not renewed,
-// so a plugged cable (charging) no longer forces the USB mode. Checked live, every 5 s.
-void adbReverseLoop(std::filesystem::path wifiOnlyFlag) {
+void adbReverseLoop() {
     wchar_t self[MAX_PATH];
     GetModuleFileNameW(nullptr, self, MAX_PATH);
     const auto adb = std::filesystem::path(self).parent_path() / L"adb" / L"adb.exe";
     if (!std::filesystem::exists(adb)) return;
-    bool removed = false;
     while (!g_stop) {
-        std::error_code ec;
-        const bool wifiOnly = std::filesystem::exists(wifiOnlyFlag, ec);
-        if (wifiOnly && removed) {
-            for (int i = 0; i < 25 && !g_stop; ++i) Sleep(200);
-            continue;
-        }
-        removed = wifiOnly;
-        std::wstring cmd = L"\"" + adb.wstring() + (wifiOnly ? L"\" reverse --remove tcp:47810" : L"\" reverse tcp:47810 tcp:47810");
+        std::wstring cmd = L"\"" + adb.wstring() + L"\" reverse tcp:47810 tcp:47810";
         STARTUPINFOW si{sizeof si};
         PROCESS_INFORMATION pi{};
         if (CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
@@ -251,7 +241,7 @@ int cmdServe(const std::vector<std::string>& a) {
 #endif
     // USB cable mode: TCP bridge + `adb reverse` refreshed every 5 s (adb shipped next to the exe).
     std::thread usb([] { kage::net::runUsbBridgeHost(g_stop); });
-    std::thread adb([&] { adbReverseLoop(dir / L"wifi.only"); });
+    std::thread adb([] { adbReverseLoop(); });
     while (!g_stop) std::this_thread::sleep_for(std::chrono::milliseconds(200));
 #ifdef KAGE_WITH_RIFT
     if (rift.joinable()) rift.join();
