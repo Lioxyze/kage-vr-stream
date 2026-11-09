@@ -78,3 +78,9 @@ Dernière mise à jour : 2026-11-06. Matériel de test : RX 6700 XT + **Meta Que
 - Sonde à 200 Mbit/s × 2000 paquets : 1220/2000 reçus en 387 ms, soit 34 Mbit/s mesurés et un départ à 20 Mbit/s. Aucune image perdue au démarrage.
 - Les deux sessions, sans la sonde, se stabilisent entre 20 et 33 Mbit/s avec de la congestion : la mesure correspond donc au Wi-Fi de ce soir. Le PC est lui aussi en Wi-Fi, donc chaque image passe deux fois par les ondes.
 - Le gain sur la latence ressentie n'est pas mesuré (Non disponible).
+
+## Bouton « Mettre à jour » (test réel 2026-11-09)
+
+- L'ancienne version 2026.11.09.1658, extraite dans un dossier à part, propose bien la 1952. Après « Oui », KageVR se ferme, les fichiers sont remplacés et KageVR redémarre tout seul. version.txt passe à 2026.11.09.1952 et driver_kage.dll est identique à celui de la release.
+- L'APK du casque branché en USB est réinstallé (lastUpdateTime 20:02:32).
+- Le SHA-256 est vérifié par le code avant de remplacer les fichiers (aucune erreur). Le cas d'un fichier corrompu n'a pas été testé.
