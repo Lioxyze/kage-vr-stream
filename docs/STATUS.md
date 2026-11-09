@@ -54,3 +54,12 @@ Dernière mise à jour : 2026-11-06. Matériel de test : RX 6700 XT + **Meta Que
 - `scripts/dev-e2e.ps1` : test de bout en bout automatique. Il utilise `adb setprop debug.kage.autoconnect 1` et désactive le capteur de proximité.
 - `KAGE_DUMP_FRAME=1` : le pilote enregistre une image composée dans `%LOCALAPPDATA%\KageVR\frame.bmp`.
 - Journaux : `%LOCALAPPDATA%\KageVR\driver.log`, `adb logcat -s KageVR`.
+
+## Wi-Fi : priorité WMM + FEC (test réel 2026-11-09)
+
+- Priorité WMM vidéo (qWAVE AudioVideo côté PC, IP_TOS 0xB8 côté Quest) : `Wi-Fi priority on` dans driver.log.
+- FEC XOR entrelacée, 1 parité pour 8 fragments, désactivée en USB. Le débit baisse tout de suite si le délai dépasse le meilleur de plus de 25 ms.
+- Session Wi-Fi de 101 s à 60 i/s, démarrée à 150 Mbit/s : 0,72 image perdue/s, transit moyen 15,8 ms, pics > 20 ms sur 18 % des secondes, congestion sur 18 % des secondes.
+- Avant ce changement, session de 34 s à 60 i/s plafonnée à 60 Mbit/s : 0,62 image perdue/s, transit 16,5 ms, pics sur 11 % des secondes.
+- Les conditions ne sont pas les mêmes (débit ×2,5, durée différente), donc pas de comparaison stricte. L'utilisateur ressent beaucoup moins de saccades.
+- Nombre de fragments récupérés par la FEC : Non disponible (logcat non lu, câble débranché).
