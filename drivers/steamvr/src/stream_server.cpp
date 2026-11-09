@@ -127,6 +127,9 @@ void StreamServer::recvLoop() {
             // Wi-Fi: measure the link once per session so the video starts at a rate it can carry.
             if (fec_ && !probeStarted_.exchange(true)) {
                 if (probeThread_.joinable()) probeThread_.join();
+                // Hold the video until the result (or 500 ms): frames sent during the burst are
+                // lost anyway and would start the session with losses and a latency spike.
+                probeHoldUntilUs_ = monotonicMicros() + 500'000;
                 probeThread_ = std::thread(&StreamServer::runProbe, this, ++probeId_);
             }
             continue;
@@ -152,6 +155,8 @@ void StreamServer::recvLoop() {
                           pr->spanUs / 1000.0, kbps / 1000);
                 if (onProbe) onProbe(kbps);
             }
+            // Probe over: release the video with a keyframe (the held frames never left).
+            if (pr->probeId == probeId_ && probeHoldUntilUs_.exchange(0) && onIdrRequest) onIdrRequest();
         } else if (auto* p = std::get_if<Ping>(&*msg)) {
             Pong pong{p->pingId, p->clientSendUs, lastRecvUs_.load(), monotonicMicros()};
             encodeMessage(pong, payload);
@@ -203,6 +208,7 @@ void StreamServer::handleSecureHello(const SecureHello& sh, const net::Endpoint&
         clientFeatures_ = 0;  // the headset re-announces its features in this session
         probeStarted_ = false;
         probeKbps_ = 0;
+        probeHoldUntilUs_ = 0;
         log::info("stream: encrypted session with {} established, Wi-Fi priority {}", from.toString(),
                   sock_.setLowLatencyPriority(from) ? "on" : "unavailable");
     }
@@ -216,6 +222,10 @@ void StreamServer::handleSecureHello(const SecureHello& sh, const net::Endpoint&
 
 void StreamServer::sendVideo(uint32_t frameIndex, bool keyframe, const VideoFrameMeta& meta,
                              std::span<const uint8_t> bitstream, uint8_t slice, bool lastSlice) {
+    if (const uint64_t hold = probeHoldUntilUs_.load(); hold && monotonicMicros() < hold) {
+        nextSlice_ = 0;  // drop the frame (its next slices too); a keyframe follows the result
+        return;
+    }
     if (slice != 0 && slice != nextSlice_) {  // a slice went missing on the PC side: skip the frame
         nextSlice_ = 0;
         return;

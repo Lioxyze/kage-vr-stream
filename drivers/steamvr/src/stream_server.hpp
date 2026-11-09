@@ -76,6 +76,7 @@ private:
     std::thread probeThread_;
     std::atomic<bool> probeStarted_{false};  // once per session
     std::atomic<uint32_t> probeId_{0}, probeKbps_{0};
+    std::atomic<uint64_t> probeHoldUntilUs_{0};  // video held while the probe owns the link
     uint64_t paceUntilUs_ = 0;  // encoder thread only
     uint8_t nextSlice_ = 0;
     std::mutex sendMutex_;  // also guards session_ (counter) and the send buffers

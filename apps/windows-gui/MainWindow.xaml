@@ -124,6 +124,9 @@
                     <TextBlock x:Name="BitrateLabel" Text="Débit max" FontSize="13" Foreground="#ECEBF4"/>
                     <Slider x:Name="BitrateSlider" Minimum="0" Maximum="400" TickFrequency="5" IsSnapToTickEnabled="True"
                             Margin="0,4,0,12" ValueChanged="OnBitrateChanged"/>
+                    <TextBlock Text="CONNEXION" FontSize="11" Foreground="#8A879C"/>
+                    <CheckBox x:Name="WifiOnlyCheck" Foreground="#ECEBF4" Margin="0,4,0,12" Click="OnWifiOnlyToggle"
+                              Content="Wi-Fi uniquement (câble USB branché = recharge seulement, pas de streaming par le câble)"/>
                     <Button Style="{StaticResource Primary}" Content="Enregistrer" Click="OnSaveSettings" HorizontalAlignment="Left"/>
                     <TextBlock x:Name="SettingsStatus" TextWrapping="Wrap" Foreground="#5CE1E6" Margin="0,8,0,0"/>
                 </StackPanel></ScrollViewer>

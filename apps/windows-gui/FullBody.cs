@@ -30,6 +30,7 @@ public partial class MainWindow
     private void InitFullBody()
     {
         FullBodyCheck.IsChecked = File.Exists(FullBodyFlag);
+        WifiOnlyCheck.IsChecked = File.Exists(WifiOnlyFlag);
         // Remembered: keep the Rift awake from launch (else it sleeps and the trackers vanish).
         if (File.Exists(KeepAwakeFlag)) { KeepAwakeCheck.IsChecked = true; OnKeepAwakeToggle(KeepAwakeCheck, new RoutedEventArgs()); }
         _keepAwake.Tick += (_, _) => Task.Run(ToggleProximityBypass);
@@ -113,6 +114,15 @@ public partial class MainWindow
     }
 
     // ---- keep-awake (same method as ODTKRA) ---------------------------------------
+    // Applied live by kage-host (checks the flag every 5 s); takes effect at the next connection.
+    private string WifiOnlyFlag => Path.Combine(_dataDir, "wifi.only");
+    private void OnWifiOnlyToggle(object s, RoutedEventArgs e)
+    {
+        if (WifiOnlyCheck.IsChecked == true) File.WriteAllText(WifiOnlyFlag, "1"); else File.Delete(WifiOnlyFlag);
+        Log(WifiOnlyCheck.IsChecked == true ? "Connexion : Wi-Fi uniquement (prise en compte à la prochaine connexion du casque)."
+                                            : "Connexion : câble USB utilisé quand il est branché.");
+    }
+
     // The Rift sleeps when its proximity sensor sees nobody, which freezes the Touch
     // tracking. The Oculus Debug Tool "Bypass Proximity Sensor Check" lasts ~10 min,
     // so it is toggled every 9 min. Rendering on the Rift is cut to 1 % resolution.
